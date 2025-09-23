@@ -1,15 +1,7 @@
 """
-Delamination detection module for DelaDect.
+Delamination detection utilities for DelaDect.
 
-Analyzes delamination in composite materials using image analysis and crack data.
-Supports upper/lower edge regions and diffuse delamination around cracks.
-
-Key Features:
-    - Edge delamination in upper & lower border slices
-    - Diffuse delamination around cracks in middle slice
-    - Otsu auto-threshold (with manual override, offsets, and multipliers)
-    - Optional accumulation vs. previous frames
-    - Plotting with optional background and crack overlays
+Segments edge and diffuse delamination in specimen image stacks produced by the crack detection pipeline, and provides helpers to threshold, post-process, and plot the resulting masks.
 """
 
 from __future__ import annotations
@@ -19,7 +11,11 @@ from typing import Any, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from numpy.typing import NDArray
+
+try:
+    from numpy.typing import NDArray
+except (ImportError, AttributeError):
+    NDArray = np.ndarray  # type: ignore[attr-defined]
 from scipy import ndimage
 from skimage.filters import threshold_otsu
 from skimage.io import imread
@@ -28,9 +24,7 @@ from skimage.io import imread
 from deladect.detection import Specimen
 
 
-# -------------------------------------------------------------------
 # Utilities
-# -------------------------------------------------------------------
 
 
 def _as_bool_mask(mask: NDArray) -> NDArray[np.bool_]:
@@ -45,23 +39,26 @@ def _as_bool_mask(mask: NDArray) -> NDArray[np.bool_]:
     return np.asarray(mask) > 0
 
 
+def _ensure_uint8(image: NDArray) -> NDArray[np.uint8]:
+    """Return a uint8 view of an image, rescaling floats when needed.
+
+    Floats with max <= 1 are treated as normalised data and scaled to 0-255.
+    Other dtypes are clipped into the byte range before casting.
+    """
+    arr = np.asarray(image)
+    if arr.dtype == np.uint8:
+        return arr
+    if np.issubdtype(arr.dtype, np.floating):
+        max_val = float(np.nanmax(arr)) if arr.size else 0.0
+        scaled = arr * 255.0 if max_val <= 1.0 + 1e-6 else arr
+        return np.clip(scaled, 0.0, 255.0).astype(np.uint8)
+    return np.clip(arr, 0, 255).astype(np.uint8)
+
 def edge_rows(mask: NDArray[np.uint8], side: str) -> Optional[NDArray[np.float64]]:
-    """Calculate the edge row indices for each column in a binary mask.
-
-    For a given binary mask and side ('top' or 'bottom'), returns an array containing
-    the row index of the first/last non-zero value in each column. Uses NaN for
-    columns without any non-zero values. Returns `None` if input is empty.
-
-    Args:
-        mask: Binary image mask where non-zero values indicate detections. Shape (H, W).
-        side: Which edge to detect, one of {'top', 'bottom'}.
-
-    Returns:
-        Optional[NDArray[np.float64]]: Array of length W with row indices per column.
-        NaN values indicate columns with no detections. Returns None if mask has no hits.
-
-    Raises:
-        ValueError: If `side` is not 'top' or 'bottom'.
+    """Return the first or last positive row per column for a binary mask.
+    
+    `side` selects the traversal direction; columns without detections yield NaN.
+    Returns None when the mask has no hits.
     """
     if mask is None or mask.size == 0 or not np.any(mask):
         return None
@@ -88,18 +85,7 @@ def plot_edge(
     rows_local: Optional[NDArray[np.float64]],
     **kwargs,
 ) -> None:
-    """Plot an edge line recovered by :func:`edge_rows`.
-
-    Args:
-        ax: Matplotlib axes to draw on.
-        start_row: Vertical offset (row index) where the slice starts on the canvas.
-        cols_w: Number of columns in the slice.
-        rows_local: Row indices per column as returned by :func:`edge_rows`. May include NaNs.
-        **kwargs: Additional keyword arguments passed to :meth:`matplotlib.axes.Axes.plot`.
-
-    Returns:
-        None
-    """
+    """Plot the edge profile reconstructed by `edge_rows` onto `ax`."""
     if rows_local is None or start_row is None:
         return
     x = np.arange(cols_w)
@@ -108,87 +94,25 @@ def plot_edge(
 
 
 def to_binary_mask(arr: Optional[NDArray]) -> Optional[NDArray[np.uint8]]:
-    """Convert arbitrary array to a binary uint8 mask (0/1).
-
-    Args:
-        arr: Input array or None.
-
-    Returns:
-        Optional[NDArray[np.uint8]]: Binary mask with values {0, 1}, or None if input is None.
-    """
+    """Return a binary uint8 mask (0/1); propagate None inputs."""
     if arr is None:
         return None
     return (_as_bool_mask(arr)).astype(np.uint8)
 
 
 def has_hits(arr: Optional[NDArray]) -> bool:
-    """Check if an array contains any positive values.
-
-    Args:
-        arr: Input array or None.
-
-    Returns:
-        bool: True if array is non-empty and contains at least one positive value.
-    """
+    """Return True when the array exists and contains a positive value."""
     return arr is not None and arr.size > 0 and np.any(arr)
 
 
-# -------------------------------------------------------------------
 # Detector
-# -------------------------------------------------------------------
 
 class DelaminationDetector:
-    """Detect delamination in a specimen.
-
-    The detector analyzes three regions:
-      * Upper edge
-      * Lower edge
-      * Middle (diffuse) region around cracks
-
-    Args:
-        specimen: Specimen instance with image paths and metadata about the specimen's properties.
-        cracks_diffuse: Cracks to use for diffuse analysis (affects results).
-        cracks_original: Cracks to plot for visualization (does not affect results).
-        window_size_edge: Window size (rows, cols) for pre-filtering in edge regions.
-            If any dimension is <= 0, it is coerced to 1 internally.
-        window_size_diffuse: Window size (rows, cols) for pre-filtering diffuse regions.
-            If None, defaults to (3×avg_crack_width_px, 3×avg_crack_width_px).
-        gaussian_filters: Sigma(s) for Gaussian filter (y_sigma, x_sigma).
-        min_pixel_value: Minimum post-smoothing intensity (0..255) to keep a pixel as positive.
-        diffuse_dx: Half-width (in pixels) of ROI around each crack in x for diffuse analysis.
-        diffuse_dy: Half-height (in pixels) of ROI around each crack in y for diffuse analysis.
-        compare_with_previous: If True, accumulates masks across frames when calling `detect()` repeatedly
-            or via `detect_all()`.
-
-    Attributes:
-        specimen: The provided specimen.
-        cracks: Cracks used for diffuse analysis.
-        cracks_orig: Cracks used only for visualization.
-        compare_with_previous: Whether to accumulate detections across frames.
-        window_size_edge: Effective edge pre-filter window (coerced to >= 1).
-        window_size_diffuse: Effective diffuse pre-filter window.
-        gaussian_filters: Effective Gaussian filter sigmas.
-        min_pixel_value: Effective min pixel threshold post-smoothing.
-        diffuse_dx: Effective half-width for diffuse ROI.
-        diffuse_dy: Effective half-height for diffuse ROI.
-
-    Examples:
-        Basic usage:
-
-        >>> specimen = Specimen(...)  # already prepared
-        >>> cracks_90, *_ = specimen.crack_eval_crossply()
-        >>> avg_crack_width_px = getattr(specimen, "avg_crack_width_px", 1.0)
-        >>> detector = DelaminationDetector(
-        ...     specimen=specimen,
-        ...     cracks_diffuse=[cracks_90, ...],
-        ...     cracks_original=[...],  # optional, for plotting
-        ...     window_size_edge=(1, 60),
-        ...     window_size_diffuse=(3.0*avg_crack_width_px, 3.0*avg_crack_width_px),
-        ...     diffuse_dx=2.0*avg_crack_width_px,
-        ...     diffuse_dy=0.0,
-        ... )
-        >>> areas_px = detector.detect(idx=0)  # [upper_px, lower_px, diffuse_px]
-        >>> results = detector.detect_all(plot=True, th_upper=145, th_lower=145, th_offset_middle=-25.0)
+    """Compute delamination masks and measurements for a specimen.
+    
+    Handles upper/lower edge slices and diffuse regions around cracks.
+    Thresholding, smoothing, ROI padding, and optional frame accumulation
+    are configured via the constructor.
     """
 
     def __init__(
@@ -211,8 +135,6 @@ class DelaminationDetector:
 
         self.specimen_name = getattr(specimen, "name", "unknown_specimen")
 
-
-        # --- store/normalize parameters (no external config class) ---
         wy, wx = int(window_size_edge[0]), int(window_size_edge[1])
         self.window_size_edge: Tuple[int, int] = (max(1, wy), max(1, wx))
 
@@ -251,7 +173,7 @@ class DelaminationDetector:
           2. Minimum filter
           3. Threshold (binary)
           4. Gaussian smoothing
-          5. Vertical minimum accumulate (column-wise)
+          5. Vertical minimum accumulate (column-wise) for edge delamination
 
         Args:
             image: Input grayscale image (uint8). Shape (H, W).
@@ -276,21 +198,95 @@ class DelaminationDetector:
         result = np.minimum.accumulate(binary, axis=0)
         return result
 
+    def _compute_diffuse_bounds(
+        self,
+        crack: NDArray,
+        image_shape: Tuple[int, int],
+    ) -> Tuple[int, int, int, int]:
+        """Return clamped ROI bounds (y0, y1, x0, x1) around a crack."""
+        h, w = image_shape
+        (y1, x1), (y2, x2) = crack
+        dx = float(self.diffuse_dx)
+        dy = float(self.diffuse_dy)
+        x_lo = int(max(0, min(x1, x2) - dx))
+        x_hi = int(min(w, max(x1, x2) + dx))
+        y_lo = int(max(0, min(y1, y2) - dy))
+        y_hi = int(min(h, max(y1, y2) + dy))
+        return y_lo, y_hi, x_lo, x_hi
+
+    def _diffuse_roi_bounds(
+        self,
+        crack: NDArray,
+        image_shape: Tuple[int, int],
+    ) -> Optional[Tuple[int, int, int, int]]:
+        """Bounds helper that discards empty ROIs."""
+        y_lo, y_hi, x_lo, x_hi = self._compute_diffuse_bounds(crack, image_shape)
+        if x_hi <= x_lo or y_hi <= y_lo:
+            return None
+        return y_lo, y_hi, x_lo, x_hi
+
+    def _process_diffuse_roi(
+        self,
+        image: NDArray[np.uint8],
+        bounds: Tuple[int, int, int, int],
+        th: Optional[float],
+        min_pixel_value: int,
+    ) -> NDArray[np.uint8]:
+        """Run the diffuse filtering pipeline on a ROI and return its mask."""
+        y_lo, y_hi, x_lo, x_hi = bounds
+        roi = image[y_lo:y_hi, x_lo:x_hi]
+        if roi.size == 0:
+            return np.zeros((0, 0), dtype=np.uint8)
+        if th is None:
+            th_value = self.images_threshold(roi, self.window_size_diffuse)
+        else:
+            th_value = float(th)
+        filtered_max = ndimage.maximum_filter(roi, size=self.window_size_diffuse)
+        filtered_min = ndimage.minimum_filter(filtered_max, size=self.window_size_diffuse)
+        binary255 = (filtered_min < th_value).astype(np.uint8) * 255
+        smoothed = ndimage.gaussian_filter(binary255, self.gaussian_filters)
+        return (smoothed > int(min_pixel_value)).astype(np.uint8)
+
+    def _prepare_edge_slice(self, image: NDArray[np.uint8], im_type: str) -> NDArray[np.uint8]:
+        """Return the edge slice in processing orientation (upper stays, lower flips)."""
+        return np.flipud(image) if im_type == "Lower" else image
+
+    def _resolve_edge_threshold(self, image: NDArray[np.uint8], manual_th: Optional[float]) -> float:
+        """Return the threshold for an edge slice, defaulting to auto-Otsu."""
+        return self.images_threshold(image) if manual_th is None else float(manual_th)
+
+    def _edge_mask(self, image: NDArray[np.uint8], threshold: float) -> NDArray[np.uint8]:
+        """Run the edge filtering pipeline for a prepared slice."""
+        return self.apply_filters(image, threshold, self.window_size_edge)
+
+    def _diffuse_mask_for_crack(
+        self,
+        image: NDArray[np.uint8],
+        crack: NDArray,
+        manual_th: Optional[float],
+        min_pixel_value: int,
+    ) -> Tuple[NDArray[np.uint8], Tuple[int, int, int, int]]:
+        """Return mask and bounds for a single crack ROI."""
+        h, w = image.shape[:2]
+        y_lo, y_hi, x_lo, x_hi = self._compute_diffuse_bounds(crack, (h, w))
+        bounds = (y_lo, y_hi, x_lo, x_hi)
+        if x_hi <= x_lo or y_hi <= y_lo:
+            return np.zeros((0, 0), dtype=np.uint8), bounds
+        roi_mask = self._process_diffuse_roi(image, bounds, manual_th, min_pixel_value)
+        return roi_mask, bounds
+
+
     def images_threshold(
         self,
         image: NDArray[np.uint8],
         window_size: Optional[Tuple[int, int]] = None,
     ) -> float:
-        """Compute the Otsu threshold on a pre-filtered image.
+        """Compute an Otsu threshold after pre-filtering.
 
-        Applies maximum and minimum filters before Otsu to improve bimodality.
-
-        Args:
-            image: Input grayscale image (uint8). Shape (H, W).
-            window_size: Window size (rows, cols) for pre-filtering. If None, uses `self.window_size_edge`.
-
-        Returns:
-            float: Otsu threshold value.
+        A max filter first dilates cracks and delaminated regions,
+        and a min filter then erodes isolated "hot" pixels. The pair acts like a
+        closing operation so the histogram presented to Otsu is smoother and more
+        bimodal, yielding a more stable threshold on noisy image samples.
         """
         if window_size is None:
             window_size = self.window_size_edge
@@ -299,57 +295,33 @@ class DelaminationDetector:
         filtered_min = ndimage.minimum_filter(filtered_max, size=(wy, wx))
         return float(threshold_otsu(filtered_min))
 
-    def area_evaluation(
+    def edge_delamination_image(
         self,
         image: NDArray[np.uint8],
         im_type: str = "Upper",
         th: Optional[float] = None,
     ) -> NDArray[np.uint8]:
-        """Evaluate edge delamination for 'Upper' or 'Lower' region and return a mask.
+        """Run the edge filtering pipeline on an upper or lower slice.
 
-        For 'Lower', the input image is flipped vertically for processing to match
-        the plotting/orientation logic.
-
-        Args:
-            image: Input grayscale image (uint8) of the edge slice.
-            im_type: Region type, either 'Upper' or 'Lower'.
-            th: Optional manual threshold value. If None, auto-calculated with Otsu.
-
-        Returns:
-            NDArray[np.uint8]: Binary mask (0/1) for detected delamination.
-
-        Examples:
-            >>> mask = detector.area_evaluation(im_upper, im_type="Upper", th=None)
-            >>> np.count_nonzero(mask)
+        Uses auto-Otsu when `th` is not provided and applies the shared edge
+        helpers for consistent processing.
         """
-        img = np.flipud(image) if im_type == "Lower" else image
-        th_val = self.images_threshold(img) if th is None else float(th)
-        mask = self.apply_filters(img, th_val, self.window_size_edge)
-        return mask
+        slice_img = self._prepare_edge_slice(image, im_type)
+        threshold = self._resolve_edge_threshold(slice_img, th)
+        return self._edge_mask(slice_img, threshold)
 
-    # ------------------------ Diffuse Delamination ------------------------
+    # Diffuse delamination
     def diffuse_delamination_image(
         self,
         image: NDArray[np.uint8],
         cracks: Optional[NDArray],
         th: Optional[float] = None,
+        min_pixel_value: int = 160,
     ) -> NDArray[np.uint8]:
-        """
-        Generate delamination mask for diffuse regions around cracks.
+        """Generate the diffuse delamination mask for a frame.
 
-        Old-behavior compatible:
-        - Pre-filter (max/min) is applied to the *full image*
-        - Global Otsu if `th` is None (no diffuse-specific window override)
-        - Gaussian smoothing + single threshold (no vertical accumulate)
-        - Stitch per-crack ROIs into an output mask using max union
-
-        Args:
-            image: Input grayscale image (uint8), shape (H, W)
-            cracks: Array of crack endpoints [(y1,x1), (y2,x2)]
-            th: Manual threshold; auto-calculated with Otsu if None
-
-        Returns:
-            uint8 binary mask (0/1) for diffuse delamination.
+        Processes each crack ROI individually and unions the resulting masks.
+        `min_pixel_value` sets the Gaussian-response cutoff (160 keeps legacy behaviour).
         """
         h, w = image.shape[:2]
         output_image = np.zeros((h, w), dtype=np.uint8)
@@ -357,35 +329,18 @@ class DelaminationDetector:
         if not (cracks is not None and getattr(cracks, "size", 0) > 0):
             return output_image
 
-        # Old code based its Otsu on the same call without an explicit diffuse window.
-        if th is None:
-            th = self.images_threshold(image)
+        manual_th = None if th is None else float(th)
 
-        # --- Apply the old-style pipeline to the full image ---
-        # (max -> min -> threshold -> gaussian -> binary @ min_pixel_value)
-        filtered_max = ndimage.maximum_filter(image, size=self.window_size_diffuse)
-        filtered_min = ndimage.minimum_filter(filtered_max, size=self.window_size_diffuse)
-        binary255 = (filtered_min < float(th)).astype(np.uint8) * 255
-        smoothed = ndimage.gaussian_filter(binary255, self.gaussian_filters)
-        full_processed = (smoothed > 160).astype(np.uint8)  # keep the old 160 default
-
-        # --- Stitch ROIs for each crack (fixes the old slicing bug) ---
         for crack in cracks:
-            (y1, x1), (y2, x2) = crack
-            # Symmetric padding around BOTH crack endpoints (old style)
-            dx = float(self.diffuse_dx)
-            dy = float(self.diffuse_dy)
-            x_lo = int(max(0, min(x1, x2) - dx))
-            x_hi = int(min(w, max(x1, x2) + dx))
-            y_lo = int(max(0, min(y1, y2) - dy))
-            y_hi = int(min(h, max(y1, y2) + dy))
-            if x_hi <= x_lo or y_hi <= y_lo:
+            roi_mask, bounds = self._diffuse_mask_for_crack(
+                image, crack, manual_th, min_pixel_value
+            )
+            y_lo, y_hi, x_lo, x_hi = bounds
+            if roi_mask.size == 0:
                 continue
-
-            roi = full_processed[y_lo:y_hi, x_lo:x_hi]
-            # Union into the output using max (avoids overwriting prior cracks)
             output_image[y_lo:y_hi, x_lo:x_hi] = np.maximum(
-                output_image[y_lo:y_hi, x_lo:x_hi], roi
+                output_image[y_lo:y_hi, x_lo:x_hi],
+                roi_mask,
             )
 
         return output_image
@@ -398,78 +353,26 @@ class DelaminationDetector:
         th: float,
         min_pixel_value: int = 160,
     ) -> Tuple[NDArray[np.uint8], int, int, int, int]:
-        """
-        Old-behavior compatible per-crack processing:
-        - ROI bounds padded symmetrically by diffuse_dx/diffuse_dy
-        - Filtering is performed on the *full image* (as before),
-            then cropped to ROI for return.
-        - No vertical accumulate step.
-
-        Returns:
-            (roi_mask, start_y, end_y, start_x, end_x)
-        """
-        h, w = image.shape[:2]
-        (y1, x1), (y2, x2) = crack
-
-        # ROI bounds (symmetric around min/max of endpoints)
-        dx = float(self.diffuse_dx)
-        dy = float(self.diffuse_dy)
-        start_x = int(max(0, min(x1, x2) - dx))
-        end_x   = int(min(w, max(x1, x2) + dx))
-        start_y = int(max(0, min(y1, y2) - dy))
-        end_y   = int(min(h, max(y1, y2) + dy))
-
-        if end_x <= start_x or end_y <= start_y:
-            return np.zeros((0, 0), dtype=np.uint8), start_y, end_y, start_x, end_x
-
-        # Apply the old pipeline to the full image, then crop
-        filtered_max = ndimage.maximum_filter(image, size=self.window_size_diffuse)
-        filtered_min = ndimage.minimum_filter(filtered_max, size=self.window_size_diffuse)
-        binary255 = (filtered_min < float(th)).astype(np.uint8) * 255
-        smoothed = ndimage.gaussian_filter(binary255, self.gaussian_filters)
-        result_full = (smoothed > int(min_pixel_value)).astype(np.uint8)
-
-        roi_mask = result_full[start_y:end_y, start_x:end_x]
-        return roi_mask, start_y, end_y, start_x, end_x
+        """Return the diffuse mask for a single crack ROI along with its bounds."""
+        roi_mask, (y_lo, y_hi, x_lo, x_hi) = self._diffuse_mask_for_crack(
+            image, crack, float(th), min_pixel_value
+        )
+        return roi_mask, y_lo, y_hi, x_lo, x_hi
 
 
-    # ------------------------ Areas ------------------------
+    # Areas
 
     @staticmethod
     def calculate_area(filtered_image: NDArray[np.uint8]) -> float:
-        """Calculate total detected area (in pixels) from a binary mask.
-
-        Args:
-            filtered_image: Binary mask (0/1).
-
-        Returns:
-            float: Number of non-zero pixels.
-
-        Examples:
-            >>> area_px = DelaminationDetector.calculate_area(mask)
-            >>> area_px >= 0
-            True
-        """
+        """Count non-zero pixels in a binary mask."""
         return float(np.count_nonzero(filtered_image))
 
-    # ------------------------ Cracks retrieval ------------------------
+    # Crack retrieval
 
     def get_frame_cracks(self, frame_idx: int) -> NDArray:
-        """Retrieve all cracks for a specific frame, stacked across orientations.
-
-        Prefers `cracks_original` if available (for plotting), otherwise uses `cracks_diffuse`.
-
-        Args:
-            frame_idx: Index of the frame to extract cracks for.
-
-        Returns:
-            NDArray: Array with shape (N, 2, 2) (two endpoints per crack).
-                        Returns an empty array if no cracks are found.
-
-        Examples:
-            >>> c = detector.get_frame_cracks(0)
-            >>> c.shape[1:] == (2, 2)
-            True
+        """Collect cracks for `frame_idx` across all orientations.
+        
+        Prefers `cracks_original` when available; returns an empty array if no crack data is stored.
         """
         cracks_data = self.cracks
         if cracks_data is None:
@@ -486,7 +389,7 @@ class DelaminationDetector:
 
         return np.vstack(frame_cracks) if frame_cracks else np.array([])
 
-    # ------------------------ Plotting ------------------------
+    # Plotting
 
     def plot_output(
         self,
@@ -499,30 +402,10 @@ class DelaminationDetector:
         index: int = 0,
         output_dir: str = "output_images",
     ) -> None:
-        """Plot and save delamination overlays.
-
-        If `background_image` is provided, masks are placed on the original specimen image.
-        Otherwise masks are stacked (upper → middle → lower) on a white canvas.
-
-        Args:
-            background_image: Background image to plot under the overlays (uint8, shape (H, W)), or None.
-            show_cracks: If True, overlay cracks (when provided).
-            filtered_upper: Binary mask (0/1) for upper edge region slice.
-            filtered_lower: Binary mask (0/1) for lower edge region slice (will be flipped for display).
-            filtered_middle: Binary mask (0/1) for diffuse region slice.
-            cracks: Array of cracks to plot (N, 2, 2).
-            index: Frame index; used for output filename.
-            output_dir: Directory to save images.
-
-        Returns:
-            None
-
-        Examples:
-            >>> detector.plot_output(
-            ...     background_image=None,
-            ...     filtered_upper=mask_u, filtered_lower=mask_l, filtered_middle=mask_m,
-            ...     cracks=detector.get_frame_cracks(0), index=0,
-            ... )
+        """Save overlay visualisations for the current frame.
+        
+        Optionally draws the grayscale background and detected cracks before
+        exporting the masks to `output_dir`.
         """
         import os
         from matplotlib.colors import ListedColormap
@@ -669,13 +552,13 @@ class DelaminationDetector:
         if not self.compare_with_previous:
             return
         if self._prev_upper is None:
-            im0 = imread(self.specimen.spec_upper.image_paths[0])
+            im0 = self.specimen.image_stack_upper[0]
             self._prev_upper = np.zeros_like(im0, dtype=np.uint8)
         if self._prev_middle is None:
-            im0 = imread(self.specimen.spec_middle.image_paths[0])
+            im0 = self.specimen.image_stack_middle[0]
             self._prev_middle = np.zeros_like(im0, dtype=np.uint8)
         if self._prev_lower is None:
-            im0 = imread(self.specimen.spec_lower.image_paths[0])
+            im0 = self.specimen.image_stack_lower[0]
             self._prev_lower = np.zeros_like(im0, dtype=np.uint8)
 
     def detect(
@@ -686,7 +569,9 @@ class DelaminationDetector:
         th_upper: Optional[float] = None,
         th_lower: Optional[float] = None,
         th_middle: Optional[float] = None,
+        min_pixel_value_middle: int = 160,
         show_cracks: bool = True,
+        dir_output: str = "output_images",
     ) -> List[float]:
         """Run delamination detection for a single frame.
 
@@ -697,6 +582,7 @@ class DelaminationDetector:
             th_upper: Manual threshold for upper edge (optional).
             th_lower: Manual threshold for lower edge (optional).
             th_middle: Manual threshold for diffuse region (optional).
+            min_pixel_value_middle: Post-smoothing cutoff for diffuse masks (optional).
             show_cracks: If True, overlay cracks on the plot.
 
         Returns:
@@ -710,27 +596,20 @@ class DelaminationDetector:
         self._ensure_prev_buffers()
 
         # images
-        im_original = self.specimen.self.image_stack_cut[idx]
-        im_upper = self.specimen.image_stack_upper[idx]
-        im_lower = self.specimen.image_stack_lower[idx]
-        im_middle = self.specimen.image_stack_middle[idx]
-
-
-
-        # image_original = imread(p_orig) if background else None
-        # im_upper = imread(p_up)
-        # im_lower = imread(p_lo)
-        # im_middle = imread(p_mid)
+        im_original = _ensure_uint8(self.specimen.image_stack_cut[idx])
+        im_upper = _ensure_uint8(self.specimen.image_stack_upper[idx])
+        im_lower = _ensure_uint8(self.specimen.image_stack_lower[idx])
+        im_middle = _ensure_uint8(self.specimen.image_stack_middle[idx])
 
         # cracks
         frame_cracks = self.get_frame_cracks(idx)
-        
-
 
         # build masks
-        mask_upper = self.area_evaluation(im_upper, im_type="Upper", th=th_upper)
-        mask_lower = self.area_evaluation(im_lower, im_type="Lower", th=th_lower)
-        mask_middle = self.diffuse_delamination_image(im_middle, frame_cracks, th=th_middle)
+        mask_upper = self.edge_delamination_image(im_upper, im_type="Upper", th=th_upper)
+        mask_lower = self.edge_delamination_image(im_lower, im_type="Lower", th=th_lower)
+        mask_middle = self.diffuse_delamination_image(
+            im_middle, frame_cracks, th=th_middle, min_pixel_value=min_pixel_value_middle
+        )
 
         if self.compare_with_previous:
             mask_upper = np.clip((self._prev_upper + mask_upper), 0, 1)
@@ -755,6 +634,7 @@ class DelaminationDetector:
                 mask_middle,
                 frame_cracks,
                 idx,
+                output_dir=dir_output
             )
         return [area_upper, area_lower, area_diffuse]
 
@@ -772,6 +652,7 @@ class DelaminationDetector:
         th_alpha_upper: float = 1.0,
         th_alpha_lower: float = 1.0,
         th_alpha_middle: float = 1.0,
+        min_pixel_value_middle: int = 160,
         use_last_frame_threshold: bool = False,
     ) -> List[List[float]]:
         """Run delamination detection over all frames.
@@ -793,6 +674,7 @@ class DelaminationDetector:
             th_alpha_upper: Multiplier applied to auto/last-frame threshold for upper edge.
             th_alpha_lower: Multiplier applied to auto/last-frame threshold for lower edge.
             th_alpha_middle: Multiplier applied to auto/last-frame threshold for diffuse region.
+            min_pixel_value_middle: Post-smoothing cutoff for diffuse masks (optional).
             use_last_frame_threshold: If True and manual thresholds are None, base auto-thresholds on last frame.
 
         Returns:
@@ -905,10 +787,11 @@ class DelaminationDetector:
                 th_upper=th_u,
                 th_lower=th_l,
                 th_middle=th_m,
+                min_pixel_value_middle=min_pixel_value_middle,
                 show_cracks=show_cracks,
             )
 
-            # Convertsion to "real" units from px**2 to mm**2
+            # Converts to "real" units from px**2 to mm**2
             real_u = area_u_px / float(self.specimen.scale_px_mm)**2
             real_l = area_l_px / float(self.specimen.scale_px_mm)**2
             real_m = area_m_px / float(self.specimen.scale_px_mm)**2
@@ -920,3 +803,6 @@ class DelaminationDetector:
             results.append([idx, total_edge, real_u, real_l, rel_edge, real_m, rel_diff])
 
         return results
+
+
+

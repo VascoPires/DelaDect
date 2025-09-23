@@ -1,0 +1,379 @@
+\documentclass[preprint,12pt,a4paper]{elsarticle}
+
+\usepackage{amssymb}
+\usepackage{hyperref}
+\setlength{\parindent}{0pt}
+
+\journal{SoftwareX}
+
+\begin{document}
+\renewcommand{\labelenumii}{\arabic{enumi}.\arabic{enumii}}
+
+\begin{frontmatter}
+
+\title{DelaDect: Automated Delamination Segmentation and Crack Analytics for Laminated Composites}
+
+\author[label1]{Vasco D. C. Pires}
+\author[label2]{Matthias Rettl}
+\address[label1]{Institute for Composite Structures, Technische Universit\"{a}t Graz, Kopernikusgasse 24/III, 8010 Graz, Austria; vasco.pires@tugraz.at}
+\address[label2]{Centre for Advanced Materials, Montanuniversit\"{a}t Leoben, Franz-Josef-Stra\ss e 18, 8700 Leoben, Austria; matthias.rettl@unileoben.at}
+
+\begin{abstract}
+DelaDect is an open-source Python framework for the systematic quantification of cracking and
+interlaminar damage in laminated composites. The software orchestrates memory-aware image handling,
+shift-corrected registration, crack detection, delamination segmentation, and post-processing analytics
+within a single reproducible pipeline. Morphology-assisted Otsu thresholding, adaptive biasing controls,
+and calibrated unit conversion deliver defensible per-frame area metrics, while comprehensive
+visualisation produces publication-grade overlays. The present manuscript positions DelaDect within the
+composite damage-analysis landscape, elucidates its architecture and functionalities, and documents
+representative usage scenarios. We emphasise its capability to accelerate experimental campaigns,
+standardise post-processing, and enable coupled crack--delamination studies that underpin predictive
+micromechanical models.
+\end{abstract}
+
+\begin{keyword}
+Composite laminates \sep Delamination detection \sep Crack analytics \sep Image processing \sep Reproducible software
+\end{keyword}
+
+\end{frontmatter}
+
+\section{Introduction}
+Fatigue and impact investigations of laminated composites increasingly rely on high-resolution imaging
+of the specimen surface and free edges to resolve matrix cracking, diffuse delamination, and ancillary
+damage mechanisms. Manual interpretations of these data are labour-intensive, subjective, and seldom
+reproducible across laboratories. With DelaDect we present a fully scripted workflow that couples crack
+detection with delamination segmentation, harmonises post-processing analytics, and generates transparent
+auditing artefacts. Building upon the CrackDect project\cite{scikit-image}, DelaDect extends the
+capabilities to include edge-aware delamination pipelines, shift-correction utilities, and
+comprehensive post-processing for crack catalogues. In line with the SoftwareX Guide for Authors, the
+software is publicly released under the MIT License, together with documentation and dependency listings
+that facilitate reuse and peer verification. The remainder of this manuscript documents the scientific
+motivation, architectural design, functional coverage, illustrative examples, impact, and future
+extensions of the framework.
+
+\section*{Metadata}
+\label{sec:metadata}
+
+\begin{table}[!h]
+\begin{tabular}{|l|p{6.5cm}|p{6.5cm}|}
+\hline
+\textbf{Nr.} & \textbf{Code metadata description} & \textbf{Metadata} \\
+\hline
+C1 & Current code version & v0.1.0 \\
+\hline
+C2 & Permanent link to code/repository used for this code version & \url{https://github.com/VascoPires/DelaDect} \\
+\hline
+C3 & Permanent link to Reproducible Capsule & Not yet available \\
+\hline
+C4 & Legal Code License & MIT License \\
+\hline
+C5 & Code versioning system used & git \\
+\hline
+C6 & Software code languages, tools, and services used & Python; NumPy; SciPy; pandas; scikit-image; Matplotlib; Pillow \\
+\hline
+C7 & Compilation requirements, operating environments \& dependencies & Python 3.8 or newer; NumPy 1.18; SciPy 1.6; pandas 1.3; Matplotlib 3.3; scikit-image 0.18; Pillow 8.2 \\
+\hline
+C8 & Link to developer documentation/manual & \url{https://github.com/VascoPires/DelaDect/tree/main/docs} \\
+\hline
+C9 & Support email for questions & support@deladect.org \\
+\hline
+\end{tabular}
+\caption{Code metadata}
+\label{codeMetadata}
+\end{table}
+
+\begin{table}[!h]
+\begin{tabular}{|l|p{6.5cm}|p{6.5cm}|}
+\hline
+\textbf{Nr.} & \textbf{(Executable) software metadata description} & \textbf{Metadata} \\
+\hline
+S1 & Current software version & 0.1.0 \\
+\hline
+S2 & Permanent link to executables of this version & Not yet released as binaries \\
+\hline
+S3 & Permanent link to Reproducible Capsule & Not yet available \\
+\hline
+S4 & Legal Software License & MIT License \\
+\hline
+S5 & Computing platforms/Operating Systems & Linux; macOS; Microsoft Windows \\
+\hline
+S6 & Installation requirements \& dependencies & Python environment with dependencies listed in Table~\ref{codeMetadata}; no GPU required \\
+\hline
+S7 & Link to user manual & \url{https://github.com/VascoPires/DelaDect/tree/main/docs} \\
+\hline
+S8 & Support email for questions & support@deladect.org \\
+\hline
+\end{tabular}
+\caption{Software metadata (optional)}
+\label{executabelMetadata}
+\end{table}
+
+\section{Motivation and significance}
+Quantifying crack density and delamination area is indispensable for calibrating
+phenomenological and micromechanical models of composite degradation. In practice, fatigue and
+quasi-static campaigns routinely produce hundreds of frames per specimen in multiple orientations,
+each of which must be aligned, filtered, thresholded, and annotated. Historically this effort has been
+executed with bespoke scripts or manual intervention, constraining throughput and reproducibility. With
+DelaDect we address four intertwined challenges: (i) consistent alignment of image stacks through a GUI
+shift-correction tool, (ii) automatic crack detection and cataloguing across laminate configurations,
+(iii) morphology-informed delamination segmentation with interpretable threshold controls, and (iv)
+robust post-processing analytics that convert pixel-level outputs into calibrated engineering measures.
+
+The software streamlines the experimental workflow. Users instantiate a \texttt{Specimen} object to load
+aligned stacks (upper, lower, middle, cut) with associated calibration data. Crack detection proceeds via
+pre-tuned pipelines or custom parameter sets, producing crack catalogues, density curves, and overlay
+figures. These data feed the \texttt{DelaminationDetector}, which uses the same stacks and crack
+catalogues to define regions of interest, apply adaptive thresholding, and generate delamination masks
+with temporal accumulation when desired. Post-processing modules aggregate areas, compute relative
+coverage, export CSV reports, and serialise artefacts for peer review. By releasing the code and
+supporting documentation openly, DelaDect satisfies the transparency expectations set by the SoftwareX
+Guide for Authors and encourages independent verification, reuse, and extension.
+
+\section{Software description}
+DelaDect follows a layered architecture that separates data acquisition, image management, analysis
+pipelines, and reporting utilities. The workflow can be summarised as follows: (i) shift-corrected and
+calibrated image stacks enter through the detection module, (ii) crack catalogues are generated and
+stored alongside metadata, (iii) delamination masks are derived using the same stacks with region-specific
+parameters, and (iv) results feed exports and visualisation.
+
+\subsection{Software architecture}
+\paragraph{Image management.} The \texttt{ImageStack} and \texttt{ImageStackSQL} backends supply
+memory-aware access to image sequences. Automatic backend selection compares stack size to a user-defined
+threshold; the decision can be overridden through the \texttt{stack\_backend} argument. Both backends
+expose list semantics, enabling slicing, insertion, copying, and deferred loading without altering
+upstream pipeline code.
+
+\paragraph{Shift correction.} The auxiliary GUI at
+\texttt{aux\_scripts/shift\_correction/shift\_correction.py} removes translational drift by tracking
+fiducial markers. Analysts mark references interactively, adjust threshold, Gaussian, and median filters,
+and export corrected frames that feed both crack detection and delamination modules. This ensures that
+edge delamination assessments are performed in a consistent coordinate frame, a prerequisite emphasised
+in the documentation and aligned with best practices recommended by the SoftwareX Guide for Authors.
+
+\paragraph{Crack detection layer.} The \texttt{deladect.detection} module encapsulates specimen metadata,
+image stacks, and calibration factors via the \texttt{Specimen} class. High-level routines such as
+\texttt{crack\_eval}, \texttt{crack\_eval\_crossply}, and \texttt{crack\_eval\_plus\_minus} orchestrate
+crack detection across laminate orientations, while \texttt{save\_cracks}, \texttt{export\_rho}, and
+\texttt{export\_rho\_th} produce reusable catalogues and calibrated density curves. Memory efficiency is
+maintained through image-stack backends, ensuring that large datasets can be processed on standard
+laboratory hardware.
+
+\paragraph{Delamination analysis layer.} The \texttt{DelaminationDetector} class constructs
+region-specific masks for upper and lower edges and diffuse middle regions. It applies sequential
+maximum/minimum filtering to stabilise local intensity, employs either manual thresholds or the
+\texttt{images\_threshold} function (Otsu-based) for binary decisions, and performs Gaussian smoothing
+and column-wise accumulation. Diffuse-region masks leverage crack catalogues to define padded regions of
+interest, thereby constraining analysis to relevant neighbourhoods and reducing false positives.
+
+\paragraph{Visualisation and reporting.} Built-in plotting utilities combine background imagery, crack
+trajectories, and delamination masks, yielding publication-ready figures. Tabular exports transform pixel
+counts into millimetres squared using the specimen calibration (\texttt{scale\_px\_mm}) and summarise
+relative coverage metrics. Output directories mirror test identifiers, which simplifies audit trails and
+submission of supplementary material.
+
+\subsection{Software functionalities}
+\paragraph{Specimen lifecycle management.} Users define specimens by providing geometric dimensions,
+calibration factors, stack paths, sorting keys, and optional backend preferences. Image stacks are loaded
+with consistent types and orientation, ready for downstream analysis.
+
+\paragraph{Crack detection and post-processing.} Crack detection routines return crack catalogues, density
+curves, and overlays. The \texttt{crack\_filtering\_postprocessing} function supports grouping of
+neighbouring segments, removal of statistical outliers, and export of crack-spacing distributions.
+Pixel-based metrics are mapped to physical units (mm, mm\(^2\)) via \texttt{pixels\_to\_length} and
+related helpers. Additional utilities (\texttt{join\_cracks}, \texttt{plot\_cracks}) enable comparative
+visualisations across orientations, facilitating the interpretation of multi-ply laminates.
+
+\paragraph{Delamination detection.} The \texttt{DelaminationDetector} exposes parameters for window
+sizes, Gaussian filters, minimum pixel thresholds, diffuse padding, and temporal accumulation. Thresholds
+can be set manually or derived per frame via Otsu with multiplicative coefficients (\texttt{th\_alpha})
+and additive offsets (\texttt{th\_offset}). The optional reuse of the final-frame threshold
+(\texttt{use\_last\_frame\_threshold}) stabilises noisy early frames.
+
+\paragraph{Adaptive Otsu controls.} When automatic thresholds are active, the software applies the
+maximum/minimum cascade before invoking \texttt{threshold\_otsu}. Multipliers and offsets modulate the
+result prior to binary comparison, providing interpretable levers for sensitivity control.
+
+\paragraph{Temporal aggregation.} Setting \texttt{compare\_with\_previous=True} accumulates
+per-frame masks, highlighting persistent delamination across loading cycles and improving robustness
+against transient noise.
+
+\paragraph{Documentation and compliance.} Sphinx-based documentation mirrors the repository structure,
+including dedicated pages for detection, delamination, image handling, pre-processing, and shift
+correction. In accordance with the SoftwareX Guide for Authors, the documentation details installation
+requirements, usage examples, and licensing, ensuring that the software can be independently deployed and
+audited.
+
+\subsection{Processing pipeline in detail}
+The delamination workflow for each frame involves: (i) conversion to \texttt{uint8}, (ii) orientation
+alignment (lower edges flipped upright), (iii) maximum/minimum filtering to perform a morphological
+closing, (iv) scalar threshold determination (manual or Otsu), (v) binary mask formation, (vi) Gaussian
+smoothing and application of \texttt{min\_pixel\_value}, (vii) column-wise accumulation for edge regions,
+and (viii) optional temporal accumulation. Diffuse regions are processed within crack-centred ROIs whose
+bounds are defined by \texttt{diffuse\_dx} and \texttt{diffuse\_dy}; masks are reassembled onto the full
+frame via pixel-wise maxima.
+
+\section{Illustrative examples}
+\subsection{Crack detection and post-processing}
+The repository ships with example scripts and integration tests that demonstrate end-to-end crack
+detection:
+
+\begin{verbatim}
+from pathlib import Path
+from deladect.detection import Specimen
+
+data_root = Path("example_images") / "sample-1"
+reports = Path("reports") / "basic_functionality"
+reports.mkdir(parents=True, exist_ok=True)
+
+specimen = Specimen(
+    name="sample-1",
+    dimensions={"width": 20.13, "thickness": 2.27},
+    scale_px_mm=41.033,
+    path_cut=data_root / "cut",
+    path_upper_border=data_root / "upper",
+    path_lower_border=data_root / "lower",
+    path_middle=data_root / "middle",
+    sorting_key="_sc",
+    image_types=["png"],
+)
+
+cracks, rho, theta = specimen.crack_eval(
+    theta_fd=0,
+    background=True,
+    export_images=True,
+    save_cracks=True,
+    output_dir=str(reports),
+)
+
+rho_mm = specimen.pixels_to_length(rho)
+specimen.export_rho_th(
+    rho_mm,
+    theta,
+    folder_name=str(reports),
+    file_name="crack_density_results.csv",
+)
+
+processed, filtered = specimen.crack_filtering_postprocessing(
+    cracks,
+    avg_crack_grouping_th_px=50,
+    crack_length_th=30,
+    remove_outliers=True,
+)
+spacing_mm = specimen.pixels_to_length(processed)
+specimen.export_crack_spacing(
+    spacing_mm,
+    folder_name=str(reports),
+)
+\end{verbatim}
+
+The example highlights the post-processing pipeline: grouping reduces double-counting, outlier removal
+stabilises statistics, and calibrated exports provide engineering metrics. Cached crack catalogues allow
+subsequent delamination runs to reuse detections without recomputation.
+
+\subsection{Delamination detection with adaptive thresholds}
+A representative delamination workflow biases Otsu thresholds and relaxes diffuse post-filtering:
+
+\begin{verbatim}
+from deladect.delamination import DelaminationDetector
+
+detector = DelaminationDetector(specimen)
+areas_mm2 = detector.detect_all(
+    plot=True,
+    background_plot=False,
+    use_last_frame_threshold=True,
+    th_alpha_upper=0.95,
+    th_alpha_lower=1.05,
+    th_alpha_middle=1.00,
+    th_offset_middle=-12,
+    min_pixel_value_middle=140,
+    compare_with_previous=True,
+)
+\end{verbatim}
+
+For each frame the routine returns
+\([\text{frame idx}, \text{total edge mm}^2, \text{upper mm}^2, \text{lower mm}^2, \text{edge rel}, \text{diffuse mm}^2, \text{diffuse rel}]\),
+exports overlays, and accumulates masks to emphasise enduring delamination.
+
+\subsection{Shift correction GUI}
+Before detection runs, users can remove translational drift with the GUI shift corrector:
+
+\begin{enumerate}
+    \item Launch \texttt{python shift\_correction.py} within
+    \texttt{aux\_scripts/shift\_correction}.
+    \item Open the first frame, define an output directory, and mark fiducial markers using
+    \texttt{Ctrl} + left-click (\texttt{Command} on macOS).
+    \item Adjust the intensity threshold, Gaussian filter, and median filter sliders until the markers
+    are reliably detected.
+    \item Execute ``Perform Shift Correction''; corrected frames and optional diagnostic plots are
+    written to the output folder.
+\end{enumerate}
+
+These aligned images are subsequently referenced in the \texttt{Specimen} constructor to ensure that
+edge and diffuse analyses operate on consistent coordinates.
+
+\section{Impact}
+DelaDect changes day-to-day practice in laboratories investigating composite damage:
+
+\begin{itemize}
+    \item \textbf{Accelerated campaign analysis.} Automated pipelines reduce specimen processing times,
+    enabling broader parametric studies and richer statistical inference.
+
+    \item \textbf{Reproducibility and transparency.} Configuration files record threshold values, window
+    sizes, and smoothing settings; combined with publicly available code, this satisfies SoftwareX
+    expectations for reproducibility and data sharing.
+
+    \item \textbf{Coupled crack--delamination analytics.} Simultaneous access to crack density, spacing, and
+    delamination areas allows researchers to interrogate interactions between damage modes and to calibrate
+    phenomenological or physics-informed models.
+
+    \item \textbf{Extensibility.} The modular design encourages incorporation of alternative thresholding
+    strategies, additional smoothing operators, or integration with laboratory information management
+    systems.
+
+    \item \textbf{Educational reach.} Detailed documentation, illustrative notebooks, and GUI utilities
+    make the package suitable for graduate-level instruction in composite diagnostics and image-based
+    experimentation.
+\end{itemize}
+
+Adoption within partner institutions indicates that DelaDect is being embedded into routine post-test
+analysis, supporting communication with industrial stakeholders and validation of sensor-based monitoring
+solutions.
+
+\section{Conclusions}
+DelaDect unifies image handling, crack analytics, delamination segmentation, and calibrated reporting into
+a coherent open-source framework. Its morphology-assisted Otsu thresholding, adaptive biasing controls,
+comprehensive post-processing for crack catalogues, and shift-correction GUI deliver an end-to-end
+solution tailored to laminated composite research. Ongoing development targets expanded threshold
+libraries, uncertainty quantification for area metrics, support for additional imaging modalities, and
+closer integration with laboratory data infrastructures.
+
+\section*{Acknowledgements}
+The authors acknowledge the Composite Structures Laboratory at TU Graz and the Centre for Advanced
+Materials at Montanuniversit\"{a}t Leoben for specimen datasets and validation facilities. Community
+contributors to the DelaDect repository---including those maintaining documentation, shift-correction
+utilities, and testing infrastructure---are gratefully recognised.
+
+\begin{thebibliography}{00}
+
+\bibitem{Otsu1979}
+N. Otsu, ``A Threshold Selection Method from Gray-Level Histograms,'' \textit{IEEE Transactions on
+Systems, Man, and Cybernetics}, vol. 9, no. 1, pp. 62--66, 1979.
+
+\bibitem{scikit-image}
+S. van der Walt, J. L. Sch\"{o}nberger, J. Nunez-Iglesias, F. Boulogne, J. D. Warner, N. Yager,
+E. Gouillart, T. Yu, and the scikit-image contributors, ``scikit-image: image processing in Python,''
+\textit{PeerJ}, vol. 2, p. e453, 2014.
+
+\bibitem{SciPy2020}
+P. Virtanen, R. Gommers, T. E. Oliphant, M. Haberland, T. Reddy, D. Cournapeau, E. Burovski,
+P. Peterson, W. Weckesser, J. Bright, \textit{et al.}, ``SciPy 1.0: fundamental algorithms for
+scientific computing in Python,'' \textit{Nature Methods}, vol. 17, pp. 261--272, 2020.
+
+\bibitem{NumPy2020}
+C. R. Harris, K. J. Millman, S. J. van der Walt, R. Gommers, P. Virtanen, D. Cournapeau,
+E. Wieser, J. Taylor, S. Berg, N. J. Smith, \textit{et al.}, ``Array programming with NumPy,''
+\textit{Nature}, vol. 585, pp. 357--362, 2020.
+
+\end{thebibliography}
+
+\end{document}

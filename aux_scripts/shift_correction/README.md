@@ -39,7 +39,7 @@ Below, the required Python libraries are described:
     to navigate to the folder using the console. Then, run the Python script by:
 
     ```bash
-    python gui.py
+    python shift_correction.py
     ```
 
     Alternatively, you can also run the Python script from any IDE.

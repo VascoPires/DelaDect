@@ -1,27 +1,77 @@
 # DelaDect
-Delamination and crack detection tool for transparent composite laminates
 
+Delamination and crack detection toolkit for transparent composite laminates. DelaDect
+extends [CrackDect](https://github.com/mattdrvo/CrackDect) with higher-level workflows,
+report-ready exports, and a shift-correction GUI tailored for static and fatigue tests.
 
-%%% Crack detection up and maybe one below, or side by side %%%%
-%%% Add here a gif with the delamination and crack detection %%%
+## Highlights
+- End-to-end automation for crack density, spacing, and visual overlays via the
+  `deladect.detection.Specimen` workflow.
+- Flexible image-stack backends (in-memory or SQL) selected automatically from your memory
+  budget.
+- Rich utilities for organising output folders, serialising intermediate crack catalogues,
+  and post-processing results.
+- Optional GUI-based shift correction (`aux_scripts/shift_correction`) for preparing aligned
+  image sequences.
+- Comprehensive example suite in `tests/test_DelaDect_crack_detection.py` that doubles as a
+  playbook for cross-ply and +/- theta laminates.
 
+## Installation
+```bash
+python -m venv .venv
+.venv\Scripts\activate      # On macOS/Linux use: source .venv/bin/activate
+pip install --upgrade pip
+pip install -e .[dev]
+```
 
-This is the documentation for how to get started and so on.
+The editable install keeps the package in sync while you iterate on notebooks, scripts, and
+documentation. See the Sphinx guide in `docs/` (or the published site once built) for
+additional platform-specific instructions.
 
-For ease of use and in order for the program to be more modular and flexible, the pre-processing of images is done completely outside of the DelaDect, either by using one of the proposed scripts (also found in this repository) or by any other tool chosen by the user. This allows for any minor tweaks or any manual procedures required in the initial images.
+## Quick start
+1. Ensure the example dataset under `example_images/sample-1` is available (images are
+   already shift-corrected).
+2. Run the smoke tests to produce crack overlays, CSV exports, and pickled crack data in
+   `tests/test_results/<timestamp>`:
+   ```bash
+   pytest tests/test_DelaDect_crack_detection.py
+   ```
+3. Explore the generated artefacts in your favourite viewer or notebook. They provide
+   concrete references for `Specimen.crack_eval`, `crack_eval_crossply`, and the
+   `crack_filtering_postprocessing` pipeline.
 
-Some examples images are provided (already shift corrected), which represent a small portion of the whole test, which can be used for testing purposes of the script. Although the authors obviously recommend a higher number of images for higher accuracy results.
+## Documentation
+- Build the HTML documentation locally:
+  ```bash
+  sphinx-build -b html docs/source docs/build/html
+  ```
+- Key entry points:
+  - `docs/source/detection.rst` - API guide and workflow overview.
+  - `docs/source/utils.rst` - geometry helpers and folder utilities.
+  - `docs/source/examples/` - narrated examples (getting started, shift correction, crack
+    detection, image handling).
 
-Furthermore, the code does not distinguish between static and cyclic loading, so the output is defined in accordance with the picture ID. This means that the user must correlate the image ID with a given strain value (for static) or cycle number (for fatigue). Some examples are provided in the aux_scripts folder, however the user must ensure the correctness of the data and how it is related with each picture. 
+## Shift correction GUI
+The auxiliary GUI that accompanies the paper lives under `aux_scripts/shift_correction`.
+Launch it with:
+```bash
+python shift_correction.py
+```
+Follow the on-screen instructions to mark reference points, tweak thresholds, and export
+aligned frames ready for DelaDect.
 
-## Introduction
+## Repository layout
+```
+deladect/                 Core package (detection workflows and utilities)
+aux_scripts/              Supporting tools (shift correction, image prep)
+docs/                     Sphinx documentation sources
+example_images/           Sample dataset used in the tests and tutorials
+tests/                    Pytest suite demonstrating end-to-end scenarios
+```
 
-## Dependencies
+## Contributing
+Issues and pull requests are welcome. Before submitting changes, run the test suite and
+HTML doc build commands above to ensure everything stays green.
 
-## 1. Using the script
-
-## 2. Possible issues
-
-## 3. Possible updates
-
-## 4. References
+## License
+Licensed under the MIT License. See `LICENSE` for details.

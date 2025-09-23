@@ -10,14 +10,17 @@ import numpy as np
 from typing import List, Optional, Union
 
 def crack_mid_point(crack: List[List[float]]) -> List[float]:
-    """
-    Calculate the midpoint of a singular crack.
+    """Return the midpoint of a crack segment.
 
     Args:
-        crack (list): List containing two crack coordinates [[x0, y0], [x1, y1]].
+        crack: Sequence with two endpoints ``[[x0, y0], [x1, y1]]``.
 
     Returns:
-        list: Coordinates of the midpoint of the crack, or [None, None] if crack is empty.
+        list[float]: Midpoint coordinates or ``[None, None]`` when the input is malformed.
+
+    Example:
+        >>> crack_mid_point([[0, 0], [4, 2]])  # doctest: +NORMALIZE_WHITESPACE
+        [2.0, 1.0]
     """
 
     crack_array = np.array(crack)
@@ -30,14 +33,17 @@ def crack_mid_point(crack: List[List[float]]) -> List[float]:
     return [mid_x, mid_y]
 
 def crack_length(crack: List[List[float]]) -> float:
-    """
-    Calculate the length of a singular crack.
+    """Compute the Euclidean length of a crack segment.
 
     Args:
-        crack (list or np.ndarray): List or array containing two crack coordinates [[x0, y0], [x1, y1]].
+        crack: Sequence with two ``[x, y]`` coordinates describing the endpoints.
 
     Returns:
-        float: Length of the crack, or 0.0 if crack is empty.
+        float: Segment length in pixels; ``0.0`` when the input is invalid.
+
+    Example:
+        >>> round(crack_length([[0, 0], [3, 4]]), 1)
+        5.0
     """
     if crack is None or len(crack) != 2:
         return 0.0
@@ -46,15 +52,19 @@ def crack_length(crack: List[List[float]]) -> float:
     return length
 
 def crack_px_mm(crack_list: List[List[List[float]]], scale: float) -> List[List[List[float]]]:
-    """
-    Scale a list of cracks from pixels to millimeters.
+    """Convert crack coordinates from pixels to millimetres.
 
     Args:
-        crack_list (list): List containing crack coordinates in pixels.
-        scale (float): Scaling factor from pixels to millimeters.
+        crack_list: Nested list of crack endpoints in pixels.
+        scale: Scaling factor expressed as pixels per millimetre.
 
     Returns:
-        list: Scaled crack coordinates in millimeters.
+        list: Crack coordinates converted to millimetres; the original list is returned when
+        ``scale`` evaluates to ``0``.
+
+    Example:
+        >>> crack_px_mm([[[0, 0], [10, 0]]], scale=5)
+        [[[0.0, 0.0], [2.0, 0.0]]]
     """
     if not crack_list or scale == 0:
         return crack_list
@@ -62,27 +72,31 @@ def crack_px_mm(crack_list: List[List[List[float]]], scale: float) -> List[List[
     return scaled_crack
 
 class SpecimenImages:
-    """
-    Handles loading and accessing images from a specified directory.
+    """Discover and sort image files for a specimen region.
 
-    Args:
-        path (str or Path): Directory containing the images.
-        suffix (str): Optional file suffix to filter images (e.g., '.png').
+    Parameters:
+        path: Directory containing the images of interest.
+        suffix: Optional file suffix to filter images (for example ``'.png'``).
+
+    Attributes:
+        image_paths: Sorted list of resolved image paths.
     """
     def __init__(self, path: Union[str, Path], suffix: Optional[str] = None):
         self.image_paths = self._load_image_paths(path, suffix)
 
     @staticmethod
     def _load_image_paths(path: Union[str, Path], suffix: Optional[str] = None) -> List[str]:
-        """
-        Load and sort image paths from the specified directory.
+        """Load image paths from ``path`` and sort them numerically when possible.
 
         Args:
             path: Directory containing the images.
-            suffix: Optional file suffix to filter images.
+            suffix: Optional suffix used to filter the discovered files.
 
         Returns:
-            A sorted list of image paths.
+            list[str]: Sorted list of image paths ready for consumption by ``crackdect``.
+
+        Raises:
+            FileNotFoundError: If ``path`` does not exist.
         """
         path = Path(path)
         if not path.exists():
@@ -102,22 +116,23 @@ class SpecimenImages:
         return [str(p) for p in sorted(files, key=numeric_key)]
 
 class DataProcessor:
-    """
-    Handles data organization and folder management.
+    """Utility helpers for organising output folders and serialised artefacts.
+
+    The processor centralises the logic used across the project to create folder
+    structures and persist crack metadata.
     """
     def __init__(self, base_folder: Optional[Union[str, Path]] = None):
         self.data_folder_path = self._get_data_folder_path(base_folder)
 
     @staticmethod
     def _get_data_folder_path(base_folder: Optional[Union[str, Path]] = None) -> str:
-        """
-        Get the path to the data folder.
+        """Resolve the base data directory.
 
         Args:
-            base_folder: Optional base folder path.
+            base_folder: Optional base path overriding the default ``./data`` directory.
 
         Returns:
-            The absolute path to the data folder.
+            str: Absolute path to the folder that should contain exported artefacts.
         """
         if base_folder:
             folder_path = Path(base_folder).resolve()
@@ -127,29 +142,31 @@ class DataProcessor:
 
     @staticmethod
     def list_folders(path: Union[str, Path]) -> List[str]:
-        """
-        List all folders in the specified path.
+        """Return the immediate subdirectories inside ``path``.
 
         Args:
-            path: Directory to search for folders.
+            path: Directory to inspect.
 
         Returns:
-            A list of folder paths.
+            list[str]: Absolute paths for each immediate subdirectory.
         """
         path = Path(path)
         return [str(p) for p in path.iterdir() if p.is_dir()]
 
     @staticmethod
     def generate_folder(parent_folder: Optional[Union[str, Path]] = None, sub_folder: Optional[str] = None) -> str:
-        """
-        Create a folder structure.
+        """Ensure a directory structure exists and return its path.
 
         Args:
-            parent_folder: Parent folder path.
-            sub_folder: Subfolder name.
+            parent_folder: Base directory that should contain the artefacts.
+            sub_folder: Optional subdirectory name to create inside ``parent_folder``.
 
         Returns:
-            The path to the created subfolder.
+            str: Absolute path to the created directory.
+
+        Example:
+            >>> DataProcessor.generate_folder('output', 'cracks')  # doctest: +SKIP
+            '.../output/cracks'
         """
         if parent_folder:
             parent_folder = Path(parent_folder)
@@ -162,13 +179,15 @@ class DataProcessor:
 
     @staticmethod
     def save_cracks_to_file(cracks, folder_name: Union[str, Path], file_name: str):
-        """
-        Save the list of cracks to a file using pickle.
+        """Serialise cracks to disk using :mod:`pickle`.
 
         Args:
-            cracks: The list of cracks to save.
-            folder_name: The directory where the file will be saved.
-            file_name: The name of the file.
+            cracks: Crack data to persist.
+            folder_name: Directory that should contain the serialised file.
+            file_name: File name to use for the pickle.
+
+        Returns:
+            None: The data is written to ``folder_name / file_name`` and the location is printed.
         """
         folder_path = Path(folder_name)
         folder_path.mkdir(parents=True, exist_ok=True)

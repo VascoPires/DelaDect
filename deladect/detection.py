@@ -21,8 +21,12 @@ from deladect.utils import DataProcessor, crack_length, crack_mid_point
 
 
 class Specimen:
-    """
-    A class to represent a specimen and perform various operations related to it.
+    """Manage crack detection workflows for a single laminate specimen.
+
+    The class keeps specimen metadata together with the image stacks required
+    for crack evaluation and exposes higher-level convenience helpers for
+    exporting results and derived metrics. See :meth:`__init__` for the
+    expected keyword arguments.
     """
     def __init__(self, name: str, dimensions: dict, scale_px_mm: float,
                  path_cut: str, path_upper_border: str, path_lower_border: str, path_middle: str,
@@ -31,6 +35,27 @@ class Specimen:
                  stack_backend: str = "auto", 
                  stack_limit_mb: float = 512.0, 
                  sql_stack_kwargs: Optional[Dict[str, Any]] = None):
+        """Initialize a specimen definition and prepare image stacks.
+
+        Args:
+            name: Identifier for the specimen (used in file names).
+            dimensions: Mapping with ``width`` and ``thickness`` in millimetres.
+            scale_px_mm: Conversion factor from millimetres to pixels (px/mm).
+            path_cut: Directory containing image frames of the cut/original view.
+            path_upper_border: Directory with images describing the upper border.
+            path_lower_border: Directory with images describing the lower border.
+            path_middle: Directory with frames of the middle region used for crack analysis.
+            sorting_key: Key passed to :func:`crackdect.sort_paths` to order the image stack.
+            image_types: Iterable of image suffixes/extensions to include (e.g. ``['.png']``).
+            avg_crack_width: Nominal crack width in pixels used for filtering and grouping.
+            strain_csv: Optional CSV file that contains a ``strain_y`` column to merge later.
+            stack_backend: One of ``'auto'``, ``'memory'`` or ``'sql'`` determining stack backend.
+            stack_limit_mb: Memory limit in megabytes before the ``'auto'`` backend switches to SQL.
+            sql_stack_kwargs: Extra keyword arguments forwarded to :meth:`ImageStackSQL.from_paths`.
+
+        Raises:
+            ValueError: If ``stack_backend`` is not recognised.
+        """
         self.name = name
         self.dimensions = dimensions  # Dictionary containing width, thickness, etc.
         self.scale_px_mm = scale_px_mm
@@ -70,6 +95,16 @@ class Specimen:
 
     @staticmethod
     def _estimate_stack_bytes(paths: List[str], *, dtype=np.float32, as_gray: Optional[bool] = True) -> int:
+        """Estimate the memory footprint of loading an image stack.
+
+        Args:
+            paths: Iterable of image paths that will be stacked.
+            dtype: Target NumPy dtype used for the stack.
+            as_gray: Whether images are converted to grayscale before stacking.
+
+        Returns:
+            int: Estimated number of bytes required to hold the stack in memory.
+        """
         paths = list(paths)
         if not paths:
             return 0
@@ -78,6 +113,19 @@ class Specimen:
         return int(arr.nbytes) * len(paths)
 
     def _build_stack(self, paths: List[str], *, dtype=np.float32, as_gray: Optional[bool] = True):
+        """Build an image stack using the configured backend.
+
+        Args:
+            paths: Ordered image paths that form the stack.
+            dtype: Target dtype forwarded to ``ImageStack`` / ``ImageStackSQL``.
+            as_gray: Whether images are converted to grayscale on load.
+
+        Returns:
+            ImageStack or ImageStackSQL: Concrete stack instance for the provided images.
+
+        Raises:
+            ValueError: If no paths are provided or the backend is unsupported.
+        """
         paths = list(paths)
         if not paths:
             raise ValueError('Cannot build an image stack without any image paths.')
@@ -105,7 +153,47 @@ class Specimen:
         if as_gray is not None:
             kwargs['as_gray'] = as_gray
         return ImageStack.from_paths(paths, **kwargs)
-        
+
+    def _initialize_image_stacks(self) -> None:
+        """Load all specimen image stacks required by analysis components."""
+        region_specs = (
+            ("cut", self.path_cut, np.float32, True, True),
+            ("upper", self.path_upper_border, np.uint8, True, False),
+            ("lower", self.path_lower_border, np.uint8, True, False),
+            ("middle", self.path_middle, np.float32, True, True),
+        )
+
+        for name, folder, dtype, as_gray, record_cycles in region_specs:
+            self._load_region_stack(
+                name=name,
+                folder=folder,
+                dtype=dtype,
+                as_gray=as_gray,
+                record_cycles=record_cycles,
+            )
+
+
+    def _load_region_stack(
+        self,
+        *,
+        name: str,
+        folder: str,
+        dtype: Any,
+        as_gray: Optional[bool],
+        record_cycles: bool,
+    ) -> None:
+        """Create an ImageStack for a single specimen region and attach it to the specimen."""
+        paths = list(image_paths(folder, image_types=self.image_types))
+        if not paths:
+            raise ValueError(f"No images found for region {name!r} in {folder!r}.")
+
+        sorted_paths, cycles = sort_paths(paths, sorting_key=self.sorting_key)
+        paths_list = list(sorted_paths)
+        setattr(self, f"path_{name}_list", paths_list)
+        setattr(self, f"cycles_{name}", cycles if record_cycles else None)
+
+        stack = self._build_stack(paths_list, dtype=dtype, as_gray=as_gray)
+        setattr(self, f"image_stack_{name}", stack)
 
     def crack_eval(self, theta_fd: int, crack_w: Optional[float] = None,
                    min_crack_size: Optional[float] = None,
@@ -116,18 +204,29 @@ class Specimen:
                    image_stack_orig = False,
                    color_cracks = 'red',
                    output_dir: Optional[str] = None) -> Tuple[List[np.ndarray], List[float], List[float]]:
-        """
-        Evaluate cracks in an image stack and optionally export images.
+        """Run the crack detector for a single fibre direction.
 
         Args:
-            theta_fd: Crack orientation angle.
-            crack_w: Crack width (in px). Defaults to self.avg_crack_width_px if not provided.
-            min_crack_size: Minimum crack size (in px).
-            export_images: Whether to export identified crack images.
-            comparison: Whether to include comparison in the plots.
+            theta_fd: Orientation angle (degrees) passed to ``detect_cracks_bender``.
+            crack_w: Expected crack width in pixels; defaults to ``avg_crack_width``.
+            min_crack_size: Minimum crack size in pixels; defaults to 10% of the specimen width.
+            export_images: If ``True``, persist overlay plots in ``output_dir``.
+            background: Plot the raw greyscale image behind the detected cracks.
+            comparison: Duplicate the frame horizontally for side-by-side comparisons.
+            save_cracks: Persist detected cracks via :meth:`DataProcessor.save_cracks_to_file`.
+            image_stack_orig: Use the cut/original stack instead of the middle region.
+            color_cracks: Matplotlib colour used to render the crack segments.
+            output_dir: Optional base directory for exported figures and pickles.
 
         Returns:
-            A tuple containing cracks, rho, and theta values.
+            tuple[list[np.ndarray], list[float], list[float]]: Detected cracks together with
+                the ``rho`` and ``theta`` values reported by ``detect_cracks_bender``.
+
+        Raises:
+            ValueError: If crack width or minimum size cannot be determined.
+
+        Example:
+            >>> cracks, rho, theta = specimen.crack_eval(theta_fd=90)  # doctest: +SKIP
         """
         # Use default crack width if not provided
         if crack_w is None:
@@ -182,25 +281,20 @@ class Specimen:
     def plot_cracks(image, cracks, linewidth=1, color='red',
                     background_flag = False, 
                     comparison=False, ax = None, **kwargs):
-        """
-        Plots cracks in the foreground with an option of displaying the background.
-            Note: This function is directly adapted from CrackDect library https://doi.org/10.1016/j.softx.2021.100832.
-        
-        Parameters
-        ----------
-        image: np.ndarray
-            Background image
-        cracks: np.ndarray
-            Array with the coordinates of the crack with the following structure:
-            ([[x0, y0],[x1,y1], [...]]) where x0 and y0 are the starting coordinates and x1, y1
-            the end of one crack. Each crack is represented by a 2x2 array stacked into a bigger array (x,2,2).
-        kwargs:
-            Forwarded to `plt.figure() <https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.figure.html>`_
+        """Visualise cracks overlaid on an image frame.
 
-        Returns
-        -------
-        fig: Figure
-        ax: Axes
+        Args:
+            image: Background image array drawn underneath the crack segments.
+            cracks: Iterable of crack segments shaped ``(n, 2, 2)`` with ``(y, x)`` coordinates.
+            linewidth: Width of the plotted crack lines.
+            color: Matplotlib colour used for the crack overlays.
+            background_flag: If ``True``, render the greyscale background image.
+            comparison: Duplicate the frame horizontally to mimic CrackDect comparison plots.
+            ax: Optional :class:`matplotlib.axes.Axes` to draw on; one is created if omitted.
+            **kwargs: Additional keyword arguments forwarded to :func:`matplotlib.pyplot.figure`.
+
+        Returns:
+            tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]: The figure/axes containing the plot.
         """
         if ax is None:
             fig = plt.figure(**kwargs)
@@ -231,9 +325,10 @@ class Specimen:
         file_name: str = "rho_data.csv",
         rho_names: Optional[List[str]] = None
     ) -> None:
-        """
-        Export multiple rho lists to a CSV file, each as a separate column.
-        Optionally merges experimental 'strain_y' data if available.
+        """Export rho metrics for one or more detection runs to CSV.
+
+        Each list becomes a dedicated column and, when available, the experimental
+        ``strain_y`` series is inserted after the identifier column.
 
         Args:
             *rho_lists: Variable number of lists of rho values.
@@ -277,14 +372,13 @@ class Specimen:
         folder_name: str = "Crack Detection",
         file_name: str = "crack_spacing_data.csv"
     ) -> None:
-        """
-        Export crack spacing data to a CSV file. Handles both full and scaled dictionary formats.
+        """Persist crack spacing statistics to disk.
 
         Args:
-            processed_data: List of dictionaries with crack spacing data.
+            processed_data: Output from :meth:`crack_filtering_postprocessing` or the
+                scaled dictionaries returned by :meth:`pixels_to_length`.
             folder_name: Directory to save the file.
             file_name: Name of the CSV file.
-            experimental_data: Optional DataFrame to merge with crack spacing data.
         """
         if not processed_data:
             print("No data to export.")
@@ -337,18 +431,16 @@ class Specimen:
         image_height: int = 1, 
         image_width: int = 1
     ) -> np.ndarray:
-        """
-        Order cracks based on the minimum y-coordinate of their endpoints.
+        """Order cracks by their vertical position and optionally add border delimiters.
 
         Args:
-            crack_list: NumPy array of shape (N, 2, 2) representing cracks, where N is the number of cracks,
-                        and each crack is represented by two endpoints.
-            delimiter: Whether to include delimiter cracks at the image borders.
-            image_height: Height of the image (in pixels).
-            image_width: Width of the image (in pixels).
+            crack_list: Array of shape ``(n, 2, 2)`` with crack endpoints defined as ``(y, x)`` pairs.
+            delimiter: If ``True``, prepend/append artificial cracks at the image borders.
+            image_height: Height of the frame in pixels.
+            image_width: Width of the frame in pixels.
 
         Returns:
-            Ordered NumPy array of cracks, optionally with delimiter cracks at the borders.
+            np.ndarray: Vertically ordered cracks (including delimiters when requested).
         """
         if len(crack_list) == 0:
             return crack_list
@@ -373,16 +465,16 @@ class Specimen:
         generate_vertical_crack: bool = True,
         group_within_crack_width: bool = True
     ) -> np.ndarray:
-        """
-        Group cracks that are close to each other based on endpoint proximity.
+        """Group neighbouring cracks to avoid double counting.
 
         Args:
-            ordered_cracks: NumPy array of shape (N, 2, 2) representing ordered cracks.
-            threshold: Maximum distance (in pixels) between crack endpoints to consider them close.
-            generate_vertical_crack: If True, generates a new vertical crack between close cracks.
+            ordered_cracks: Array of ordered cracks shaped ``(n, 2, 2)``.
+            threshold: Maximum distance (in pixels) between crack endpoints before merging.
+            generate_vertical_crack: If ``True``, synthesize a horizontal segment spanning the group.
+            group_within_crack_width: Merge cracks whose centrelines fall within twice the nominal width.
 
         Returns:
-            NumPy array of cracks after grouping.
+            np.ndarray: Crack segments after grouping.
         """
         if len(ordered_cracks) == 0:
             return ordered_cracks
@@ -467,15 +559,14 @@ class Specimen:
         crack_list: List[np.ndarray], 
         length_threshold: float
     ) -> List[np.ndarray]:
-        """
-        Filter cracks based on their length.
+        """Remove cracks shorter than the requested length.
 
         Args:
-            crack_list: List of cracks for a given frame.
-            length_threshold: Minimum length threshold for a crack to be retained.
+            crack_list: Cracks detected for a specific frame.
+            length_threshold: Minimum admissible crack length in pixels.
 
         Returns:
-            Filtered list of cracks.
+            list[np.ndarray]: Filtered cracks for the frame.
         """
         filtered_cracks = [
             crack for crack in crack_list
@@ -488,18 +579,14 @@ class Specimen:
         crack_list: List[np.ndarray], 
         plot_dis: bool = False,
     ) -> Tuple[List[float], float, float]:
-        """
-        Compute the vertical spacing between cracks in a given frame.
+        """Calculate the distance between consecutive crack mid-points.
 
         Args:
-            crack_list: List of cracks for a given frame.
-            plot_dis: Whether to plot the distribution of crack midpoints.
+            crack_list: Cracks detected for a single frame.
+            plot_dis: Reserved for debugging plots (not currently used).
 
         Returns:
-            Tuple containing:
-                - List of crack spacings,
-                - Average spacing,
-                - Standard deviation of spacing.
+            tuple[list[float], float, float]: Pairwise spacings together with their mean and standard deviation.
         """
         if len(crack_list) == 0:
             return [], 0.0, 0.0
@@ -527,19 +614,20 @@ class Specimen:
         remove_outliers: bool = True,
         grouping: bool = False
     ) -> List[Dict[str, Any]]:
-        """
-        Post-process detected cracks: order, group, filter, and analyze spacing.
-        In this subroutine, cracks which follow the following criteria are grouped:
-            - Cracks which are distanced less than the defined `self.avg_crack_width_px`
-            - Opposing cracks with tips "almost" touching where the max distance is defined by `avg_crack_grouping_th_px`
+        """Post-process crack detections by ordering, grouping and filtering.
 
         Args:
             cracks: List of detected cracks for each frame.
-            avg_crack_grouping_th_px: Threshold for grouping cracks (in pixels).
-            crack_length_th: Minimum crack length threshold (in pixels).
+            avg_crack_grouping_th_px: Threshold, in pixels, for grouping nearby cracks.
+            crack_length_th: Minimum crack length in pixels.
+            export_images: If ``True``, persist diagnostic plots of the filtered cracks.
+            background: Whether to plot the greyscale background in the diagnostics.
+            remove_outliers: Remove crack spacing outliers using the IQR method.
+            grouping: Enable the second-stage grouping heuristic for nearly touching cracks.
 
         Returns:
-            List of dictionaries with analysis results for each frame.
+            tuple[list[dict[str, float]], List[List[np.ndarray]]]: Summary statistics per frame
+            alongside the filtered crack segments.
         """
 
         if not cracks:
@@ -611,19 +699,21 @@ class Specimen:
         return data, cracks_filtered_all
     
     def pixels_to_length(self, input_data):
-        """
-        Convert pixel values to length using the scale factor.
-        Accepts either a list of rho values or the output from crack_filtering_postprocessing.
+        """Convert crack metrics from pixels to millimetres.
 
         Args:
-            input_data: List of rho values (List[float]) or output from crack_filtering_postprocessing.
+            input_data: Either a list of rho values, the tuple returned by
+                :meth:`crack_filtering_postprocessing`, or a list of processed dictionaries.
 
         Returns:
-            If input is a list of floats: List of scaled values (in mm).
-            If input is from crack_filtering_postprocessing: Processed data with scaled values.
+            list[float] or list[dict[str, float]]: Values scaled to millimetres while preserving
+            the input structure.
+
+        Raises:
+            ValueError: If ``input_data`` does not match one of the supported formats.
         """
         # If input_data is a tuple/list from crack_filtering_postprocessing
-        # It typically returns (processed_data, filtered_cracks)
+
         if isinstance(input_data, (list, tuple)) and len(input_data) == 2:
             processed_data = input_data[0]  # This should be the list of dicts
             
@@ -700,12 +790,12 @@ class Specimen:
                     cracks: List[np.ndarray],
                     folder_name: str = "Crack Detection", 
                     file_name: Optional[str] = None):
-        """
-        Save the current specimen's cracks data to a pickle file.
+        """Persist the current specimen's cracks to a pickle file.
 
         Args:
+            cracks: Crack segments to serialise.
             folder_name: Directory to save the file.
-            file_name: Name of the file (default: uses specimen name).
+            file_name: Optional explicit file name; defaults to ``{name}_cracks_data.pkl``.
         """
         
         if file_name is None:
@@ -722,14 +812,13 @@ class Specimen:
     
     @staticmethod
     def load_cracks(file_path: str):
-        """
-        Load cracks data from a pickle file.
+        """Load previously saved cracks from a pickle file.
 
         Args:
             file_path: Path to the pickle file.
 
         Returns:
-            Loaded cracks data.
+            Any: Deserialised crack data, matching what was originally saved.
         """
         with open(file_path, 'rb') as f:
             cracks = pickle.load(f)
@@ -737,14 +826,13 @@ class Specimen:
     
     @staticmethod
     def join_cracks(*crack_lists: List[np.ndarray]) -> List[np.ndarray]:
-        """
-        Join multiple lists of cracks frame by frame using np.vstack.
+        """Combine multiple crack lists frame by frame.
 
         Args:
-            *crack_lists: Variable number of lists, each containing arrays of cracks per frame.
+            *crack_lists: Variable number of crack lists; each entry must have the same length.
 
         Returns:
-            List of joined cracks per frame.
+            list[np.ndarray]: Frame-wise concatenation of the provided crack segments.
         """
         if not crack_lists:
             return []
@@ -772,12 +860,11 @@ class Specimen:
 
 
     def full_specimen_eval_transverse(self):
-        """
-        Utility function that performs transverse cracking for the original (cut) image in a 
-        cross-ply specimen.
-        
-        Used for visualization purpose, so that cracks can be overlayed on the original image but
-        not used for any evaluation purposes.
+        """Evaluate the original stack at 0 and 90 degrees for visualisation.
+
+        Returns:
+            tuple[list[np.ndarray], list[np.ndarray]]: Cracks detected at 0 and 90 degrees on the
+            original (cut) image stack.
         """
         cracks_transv, _ , _ = self.crack_eval(theta_fd=0, image_stack_orig=True)
         cracks_splitting, _ , _ = self.crack_eval(theta_fd=90, image_stack_orig=True)
@@ -797,21 +884,26 @@ class Specimen:
         output_dir: str = None,
         c_length_th: Optional[float] = None
     ) -> Tuple[List[np.ndarray], List[float], List[float], List[np.ndarray], List[float], List[float]]:
-        """
-        Special case, for crack evaluation for cross-ply laminates, where theta_fd = 0 and 90 degrees.
+        """Evaluate a cross-ply laminate at 0 and 90 degrees.
+
+        The method handles caching, optional post-processing, figure exports and result
+        serialisation for the two orthogonal fibre directions.
 
         Args:
-            theta_fd: Crack orientation angle.
-            export_images: Whether to export identified crack images.
-            background: Whether to include background in the plots.
-            comparison: Whether to include comparison in the plots.
-            timing: Whether to print elapsed time for the analysis.
-            output_dir: Optional base directory for saving results. If None, uses current working directory.
-            c_length_th: Optional crack length threshold for filtering. 
-                If None, defaults to 0.20 * width * scale_px_mm.
+            export_images: If ``True``, save overlay plots for each frame.
+            background: Draw the greyscale background when exporting plots.
+            comparison: Duplicate the frame horizontally for side-by-side comparisons.
+            post_processing: Run :meth:`crack_filtering_postprocessing` on the 0-degree results.
+            avg_crack_grouping_th_px: Threshold, in pixels, used during post-processing grouping.
+            save_cracks: Persist detected cracks to disk for future reuse.
+            color_cracks: Matplotlib colour for the plotted cracks.
+            timing: If ``True``, print how long the evaluation took.
+            output_dir: Optional base directory for exported artefacts.
+            c_length_th: Minimum crack length in pixels; defaults to ``0.20 * width * scale_px_mm``.
 
         Returns:
-            A tuple containing cracks, rho, and theta values. Results in mm if post_processing is True.
+            tuple[list[np.ndarray], List[float], List[float], list[np.ndarray], List[float], List[float]]:
+            Detected cracks and associated rho/theta series for 0 and 90 degrees.
         """
 
         # Default crack length threshold for filtering
@@ -938,22 +1030,29 @@ class Specimen:
         output_dir: str = None,
         c_length_th: Optional[float] = None
     ) -> Tuple[List[np.ndarray], List[float], List[float], List[np.ndarray], List[float], List[float]]:
-        """
-        Special case, for crack evaluation for plus and minus laminates, where theta_fd = +/- theta. 
-        Additionally, it can also be used if a transverse layer is included in the laminate stacking sequence.
+        """Evaluate a plus/minus laminate and optionally an additional transverse layer.
+
+        The method executes the crack detector for ``+theta`` and ``-theta`` directions,
+        handles caching/export logic and can extend the workflow with a transverse (0-degree) layer.
 
         Args:
-            theta_fd: Crack orientation angle for the +/- theta laminate.
-            export_images: Whether to export identified crack images.
-            background: Whether to include background in the plots.
-            comparison: Whether to include comparison in the plots.
-            timing: Whether to print elapsed time for the analysis.
-            output_dir: Optional base directory for saving results. If None, uses current working directory.
-            c_length_th: Optional crack length threshold for filtering. 
-                If None, defaults to 0.20 * width * scale_px_mm.
+            theta_fd: Crack orientation angle (degrees) for the plus/minus plies.
+            export_images: If ``True``, save overlay plots for each frame.
+            background: Draw the greyscale background when exporting plots.
+            comparison: Duplicate the frame horizontally for side-by-side comparisons.
+            transverse_layer: Run an additional 0-degree evaluation to represent a transverse ply.
+            post_processing: Run :meth:`crack_filtering_postprocessing` on the transverse cracks.
+            avg_crack_grouping_th_px: Grouping threshold in pixels used during post-processing.
+            save_cracks: Persist detected cracks to disk for future reuse.
+            color_cracks: Matplotlib colour applied to plus/minus cracks.
+            color_transverse: Matplotlib colour applied to transverse cracks.
+            timing: If ``True``, print how long the evaluation took.
+            output_dir: Optional base directory for exported artefacts.
+            c_length_th: Minimum crack length in pixels; defaults to ``0.20 * width * scale_px_mm``.
 
         Returns:
-            A tuple containing cracks, rho, and theta values. In mm.
+            tuple: Detected cracks together with their ``rho`` and ``theta`` metadata. When
+            ``transverse_layer`` is ``True``, the tuple also includes the transverse results.
         """
 
         if c_length_th is None:

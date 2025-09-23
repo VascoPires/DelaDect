@@ -1,0 +1,96 @@
+DelaDect Documentation Summary
+==============================
+
+Project Scope
+-------------
+DelaDect is an open-source Python toolkit for analysing laminated composite specimens. It builds on crack detection workflows to quantify crack density and to segment delamination across specimen image stacks. The software targets reproducible, scriptable pipelines that transform calibrated grayscale frames into crack catalogues, delamination masks, quantitative area metrics, and publication-ready visualisations.
+
+Core Modules
+------------
+1. deladect.detection
+   - Provides the Specimen class, which packages specimen metadata (dimensions, scale, paths to aligned image stacks) together with analysis helpers.
+   - Supports multiple stack backends (in-memory ImageStack or SQL-backed ImageStackSQL) selected automatically based on estimated memory usage, with manual override via the stack_backend argument.
+   - Offers evaluation routines such as crack_eval, crack_eval_crossply, crack_eval_plus_minus, and crack_filtering_postprocessing to generate crack catalogues, crack-density curves (rho, theta), and post-processed spacing metrics.
+   - Includes visualisation helpers (plot_cracks) and export utilities (export_rho, export_rho_th, export_crack_spacing, save_cracks) for dissemination-ready artefacts.
+   - Typical workflow:
+        * Instantiate Specimen with paths to cut, upper, lower, and middle image stacks, plus calibration parameters (scale_px_mm, dimensions) and optional backend configuration.
+        * Run specimen.crack_eval(...) to obtain cracks, rho, theta, export overlays, and persist crack catalogues.
+        * Convert pixel-based measures to millimetres using pixels_to_length and export results.
+   - Advanced scenarios involve cross-ply and plus/minus laminate helpers, outlier removal, grouping of nearby cracks, and merging multiple crack catalogues for comparative plots.
+
+2. deladect.delamination
+   - Introduces DelaminationDetector, operating on Specimen-provided stacks and optional crack catalogues to generate delamination masks.
+   - Focuses on three anatomical regions per frame: upper edge, lower edge, and diffuse middle around cracks.
+   - Outputs include per-region binary masks, pixel-area counts, millimetre-scale conversions, and overlay figures with optional crack trajectories.
+
+Delamination Pipeline
+---------------------
+For each frame and region, DelaminationDetector executes:
+1. Region-of-interest extraction with orientation alignment (lower edge slices are flipped to maintain a consistent frame of reference).
+2. Morphological pre-filtering (maximum filter followed by minimum filter) with configurable window sizes to suppress isolated noise while strengthening contiguous delamination fronts.
+3. Threshold determination:
+   - Manual override: th_upper, th_lower, or th_middle provided to detect/detect_all are used verbatim for every frame in that region.
+   - Automatic inference: images_threshold applies the same max/min cascade and evaluates skimage.filters.threshold_otsu on the filtered intensities. Otsu maximises between-class variance, selecting the valley between background and foreground.
+   - Manual and automatic branches are mutually exclusive; one scalar threshold per region per frame feeds the binary comparison.
+4. Binary mask generation (filtered pixels compared against the scalar threshold, producing 0/255 images).
+5. Gaussian smoothing (configurable standard deviations) followed by:
+   - Column-wise minimum accumulation for edge regions.
+   - Optional accumulation with previous-frame masks when compare_with_previous=True.
+6. Secondary intensity gating via min_pixel_value (or min_pixel_value_middle for diffuse regions). This post-smoothing cutoff controls how strong the blurred response must be to survive; lowering it keeps weaker detections, raising it suppresses marginal signals without altering the initial threshold.
+
+Adaptive Otsu Controls
+----------------------
+When automatic thresholds are in use:
+- th_alpha_upper/th_alpha_lower/th_alpha_middle scale the Otsu-derived threshold multiplicatively (values <1.0 increase sensitivity, >1.0 make results conservative).
+- th_offset_upper/th_offset_lower/th_offset_middle add a fixed intensity offset (0–255) to compensate for illumination drift.
+- use_last_frame_threshold=True computes baseline Otsu thresholds from the final frame of each stack and reuses them as base_th for earlier frames, stabilising early-frame estimates in noisy series.
+These modifiers are ignored whenever a manual threshold is supplied for the corresponding region.
+
+Outputs and Visualisation
+-------------------------
+- detect(idx, ...) returns [area_upper_px, area_lower_px, area_diffuse_px] per frame, optionally plotting overlays and accumulating masks across frames.
+- detect_all(...) processes entire stacks, applies manual/automatic thresholds with alpha/offset adjustments, converts pixel counts to mm^2 (using specimen.scale_px_mm), and can generate figures per frame.
+- plot_output overlays upper, middle, and lower masks on either composite canvases or background images, optionally plotting crack trajectories and traced edge profiles.
+
+Image Handling Backend
+----------------------
+- ImageStack (RAM-based) suits smaller datasets; ImageStackSQL (SQLAlchemy-backed) streams images for large datasets. Automatic selection uses estimated memory consumption and the stack_limit_mb parameter; stack_backend allows manual choice ("auto", "memory", "sql").
+- Users can interact with stacks directly (add_image, slicing, copying, saving state) when needed, though DelaDect typically manages them internally.
+
+Shift Correction Utility
+------------------------
+- Auxiliary GUI (aux_scripts/shift_correction/shift_correction.py) corrects translational drift and jitter before analysis.
+- Workflow: launch GUI, open first image, select output directory, mark fiducial markers (Ctrl/Command + click), adjust threshold/Gaussian/median filters, and perform shift correction.
+- Ensures aligned inputs so edge delamination detection operates reliably.
+- Requires matplotlib >=3.7, numpy >=1.24, Pillow >=9.4, scipy >=1.11, scikit-image >=0.20.
+
+Image Pre-processing Requirement
+--------------------------------
+- Specimen must be horizontally aligned for accurate edge delamination detection; misalignment compromises results.
+
+Example Workflows
+-----------------
+- Crack detection example scripts show how to instantiate Specimen, execute crack_eval with export options, handle cross-ply datasets, perform crack filtering and spacing analysis, and produce merged crack overlays.
+- Delamination example (documentation snippet) demonstrates detect_all with Otsu thresholds biased via th_alpha/th_offset, last-frame anchoring, and adjusted min_pixel_value for diffuse masks.
+
+Software Metadata (from manuscript draft)
+-----------------------------------------
+- Version: 0.1.0 (git-based repository at https://github.com/VascoPires/DelaDect).
+- License: MIT; Python 3.8+; dependencies include NumPy 1.18, SciPy 1.6, pandas 1.3, Matplotlib 3.3, scikit-image 0.18, Pillow 8.2.
+- Executable binaries not yet released; reproducible capsule pending.
+- Documentation hosted under docs/ with Sphinx reStructuredText sources.
+- Support contact (placeholder): support@deladect.org.
+
+Key Advantages and Impact Points
+--------------------------------
+- Automates previously manual, subjective delamination assessments across large image sequences.
+- Couples crack detection outputs with spatially resolved delamination measurements.
+- Provides reproducible, configurable thresholding (manual, Otsu, and biased auto) with robust morphological pre-processing.
+- Generates metrics in physical units and high-quality overlays for reporting.
+- Extensible architecture enabling substitution of thresholding or post-processing steps and integration into notebooks or batch scripts.
+- Facilitates cross-laboratory comparability, rapid parameter studies, and exploratory correlations between cracks and delamination footprints.
+
+Future Directions (from manuscript conclusions)
+-----------------------------------------------
+- Expand thresholding options, add uncertainty quantification, integrate with laboratory information systems, and broaden support for additional imaging modalities.
+

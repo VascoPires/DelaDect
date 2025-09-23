@@ -5,63 +5,69 @@ DelaDect: Optical Delamination Detection in Fiber-Reinforced Polymers
    :alt: DelaDect Logo
    :align: center
 
-DelaDect is a Python package for detecting delaminations in fiber-reinforced polymers using optical methods.  
-It provides tools for image processing and feature extraction to identify and classify delaminations from sequences of images.  
-On top of CrackDect, DelaDect adds additional functionality and quality-of-life improvements to simplify the delamination detection workflow.
+DelaDect is a Python package for detecting delaminations and cracks in
+fiber-reinforced polymers using optical methods.  It builds on the CrackDect project and
+adds higher-level workflows, improved shift-correction tooling, and richer reporting.
 
-Getting Started
----------------
+Installation
+------------
 
-The first step is to install the required dependencies. The full list is available in :ref:`Prerequisites`.  
-DelaDect can be installed directly from PyPI:
-
-.. code-block:: bash
-
-   $ pip install deladec
-
-Alternatively, you can clone the repository and install it locally:
+Create an isolated environment, install the dependencies, and add DelaDect in editable
+mode while you explore the examples:
 
 .. code-block:: bash
 
-   $ git clone https://github.com/<your-repo>/deladec.git
-   $ cd deladec
-   $ pip install .
+   python -m venv .venv
+   .venv\\Scripts\\activate      # On macOS/Linux use: source .venv/bin/activate
+   pip install --upgrade pip
+   pip install -e .[dev]
 
-Dependencies are installed automatically, but note that some versions are pinned for compatibility reasons.  
-If you prefer using the latest package versions, be aware that certain features may not work as expected.  
-We recommend creating a virtual environment to keep things isolated. With conda:
-
-.. code-block:: bash
-
-   $ conda create -n deladec_env python=3.8
-   $ conda activate deladec_env
+The :doc:examples/getting_started guide expands on the commands above and walks through
+your first analysis run.
 
 Prerequisites
 -------------
 
 - CrackDect 0.2
-- scikit-image 0.18.1
-- numpy >= 1.19.5
-- scipy 1.6.0
-- matplotlib >= 3.3.4
-- sqlalchemy 1.3.23
-- numba 0.52.0
-- psutil 5.8.0
+- scikit-image 0.18+
+- numpy >= 1.19
+- scipy 1.6+
+- matplotlib >= 3.3
+- sqlalchemy 1.3+
+- numba 0.52+
+- psutil 5.8+
 
-Authors
--------
 
-- Vasco D.C. Pires
-
-License
--------
-
-This project is licensed under the MIT License.
+------------------
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: User Documentation
 
    image_pre_processing
+   detection
+   utils
+   delamination
+
+
+--------
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Examples
+
+   examples/getting_started
    image_handling
-   
+   examples/shift_correction
+   examples/crack_detection
+
+Project Information
+-------------------
+
+Authors
+~~~~~~~
+- Vasco D. C. Pires
+
+License
+~~~~~~~
+This project is licensed under the MIT License.
