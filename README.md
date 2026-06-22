@@ -3,11 +3,11 @@
 </p>
 
 
-<p align="center">
+<!-- <p align="center">
   <a href="https://deladect.readthedocs.io">Documentation</a>
   ·
   <a href="https://github.com/VascoPires/DelaDect">Repository</a>
-</p>
+</p> -->
 
 <p align="center">
   <img src="docs/source/_static/sample5_sequence.gif" alt="DelaDect visualization" width="720">
