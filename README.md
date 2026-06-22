@@ -52,9 +52,6 @@ The package also included a shift-distortion correction for the image stack prep
 shift_correction --help
 ```
 
-Including
-
-
 ## Repository Layout
 
 ```text
