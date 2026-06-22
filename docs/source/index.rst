@@ -13,8 +13,8 @@ stacks of fiber-reinforced composites. The workflow combines:
 - Stage II edge and diffuse delamination detection
 - reusable preprocessing caches and reproducible exports (masks, overlays, CSV)
 
-.. image:: _static/laminate_3d.gif
-   :alt: Animated DelaDect visualization
+.. image:: _static/sample5_sequence.gif
+   :alt: DelaDect visualization
    :width: 720
    :align: center
 
@@ -134,4 +134,4 @@ The current code base was developed by
 
 License
 ~~~~~~~
-This project is licensed under the MIT License.
+This project is licensed under the AGPL-3.0 License.

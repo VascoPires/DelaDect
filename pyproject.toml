@@ -8,6 +8,7 @@ version = "1.0.1"
 description = "Crack and delamination detection for translucent fiber-reinforced composites."
 readme = "README.md"
 license = { file = "LICENSE" }
+license-expression = "AGPL-3.0-only"
 authors = [{ name = "Vasco D.C. Pires" }]
 requires-python = ">=3.9"
 dependencies = [
