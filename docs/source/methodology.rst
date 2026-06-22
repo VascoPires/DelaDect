@@ -173,8 +173,8 @@ Edge primary parameters (``detect_primary(params=...)``)
 - ``scale_max=255.0``
 - ``seed_ratio=0.01``
 - ``connectivity_mode="directional"`` (optional ``"legacy_flood"`` compatibility mode)
-- ``directional_lateral_drift_px=None`` (explicit horizontal drift per row)
-- ``directional_lateral_drift_scale=0.25`` (drift scale x avg crack width when ``*_px`` is ``None``)
+- ``directional_lateral_drift_px=None``
+- ``directional_lateral_drift_scale=0.25``
 - ``hard_floor=0.90`` (normalized gate on smoothed image; tweak per specimen)
 - ``post_threshold_closing_scale=2.5``
 - ``post_threshold_closing_radius`` (optional explicit override; ``0`` disables closing)
@@ -189,17 +189,11 @@ Diffuse parameters (``diffuse_delamination(params=...)``)
 - ``threshold_downsample=2``
 - ``window_diffuse=(0, 60)``
 - ``gaussian_filters=(0.5, 15.0)``
-- ``scale_min=150.0``, ``scale_max=255.0`` (used as fixed scaling bounds)
+- ``scale_min=150.0``, ``scale_max=255.0`` (fixed scaling bounds)
 - ``scale_min_percentile=10.0``, ``scale_max_percentile=99.0``
   (when both are set, per-ROI percentiles override fixed bounds)
 - ``hard_floor=0.90`` (normalized gate on diffuse-smoothed ROI; tweak per specimen)
 - ``post_threshold_closing_scale=2.5``
-
-Hard-floor notes
-^^^^^^^^^^^^^^^^
-- Glud/Bender-style crack pipelines commonly use a strict threshold near ``0.96`` in their processed domain.
-- For delamination segmentation in this repository, ``0.90`` is the current practical default in recent tuning.
-- You can override ``hard_floor`` independently for edge and diffuse in your study registry or per-run params.
 
 For a lagged single-frame rolling reference, use preprocessing
 ``reference_mode="rolling_median"`` with ``reference_window=1`` and tune

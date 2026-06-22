@@ -1,20 +1,20 @@
 Shift Correction GUI
 ====================
 
-Accurate crack detection starts with well-aligned image sequences. The auxiliary script in
-``aux_scripts/shift_correction`` provides a lightweight GUI for correcting marker-based
-shift distortion before the frames ever reach DelaDect.
+Accurate crack detection starts with well-aligned image sequences. The auxiliary
+script in ``aux_scripts/shift_correction`` provides a lightweight GUI for
+correcting marker-based shift distortion before frames reach DelaDect.
 
 When to use it
 --------------
-Use the GUI whenever the raw footage exhibits translational drift or camera jitter that
-would otherwise lead to false crack detections. The tool was designed to overcome the
-limitations of the shift correction bundled with CrackDect for static experiments.
+Use the GUI whenever raw footage shows translational drift or camera jitter that
+would otherwise produce false crack detections. The tool addresses limitations
+in the shift correction bundled with CrackDect for static experiments.
 
 Dependencies
 ------------
-Create a small virtual environment and install the libraries listed below (versions are the
-ones the authors use in production):
+Create a virtual environment and install the libraries listed below (versions
+match the setup used by the authors in production):
 
 - ``matplotlib`` 3.7+
 - ``numpy`` 1.24+
@@ -31,6 +31,12 @@ Using the GUI
    .. code-block:: bash
 
       python shift_correction.py
+
+   or via installed console entry point:
+
+   .. code-block:: bash
+
+      shift_correction
 
 2. Open the first frame via ``File -> Open First Image``.
 3. Choose the destination for the corrected frames with ``File -> Save Images In``.
@@ -49,12 +55,18 @@ The GUI exposes several processing parameters:
 
 Outputs
 -------
-The application writes shift-corrected frames into your target folder and optionally
-produces diagnostic plots for marker tracking (see ``aux_scripts/shift_correction/media`` for
-examples).
+The application writes shift-corrected frames to your target folder and can
+optionally generate diagnostic plots for marker tracking (see
+``aux_scripts/shift_correction/media`` for examples).
+
+Typical output structure:
+
+- ``<output>/<specimen>/shift_corrected/*.bmp``
+- ``<output>/<specimen>/plots/*.png`` (when plotting is enabled)
+- ``<output>/<specimen>/strain_data.csv`` (when strain evaluation is enabled)
 
 Integrating with DelaDect
 -------------------------
-Point your :class:`~deladect.detection.Specimen` paths (``path_cut``/``path_middle`` etc.) to
+Point your :class:`~deladect.specimen.Specimen` paths (``path_full``/``path_middle`` etc.) to
 these corrected folders and proceed with the workflows described in
 :doc:`../examples/getting_started` and :doc:`../detection`.

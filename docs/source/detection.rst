@@ -3,83 +3,131 @@ DelaDect Detection API
 
 Overview
 --------
-DelaDect's detection layer turns aligned image sequences into crack-density curves,
-spacing statistics, and ready-to-share figures. The
-:class:`~deladect.detection.Specimen` class keeps specimen metadata, image stacks, and
-analysis helpers together so you can run complete evaluations without wiring everything by
-hand.
+The detection package exposes both crack and delamination workflows under
+``deladect.detection``:
 
-Key capabilities
-----------------
-- Flexible image stack backends (in-memory or SQL) that switch automatically based on your
-  ``stack_backend`` choice and memory budget.
-- Convenience wrappers for common laminate scenarios (standard, cross-ply, and plus/minus
-  layups) with optional caching and post-processing steps.
-- Visualisation helpers that overlay detected cracks on top of the original or processed
-  frames for quick sanity checks.
-- Export tools for rho/theta series, crack spacing summaries, and pickled crack data for
-  follow-up analysis.
+- crack-oriented functions in :mod:`deladect.detection.crack_detection`
+- class-based delamination workflows in :mod:`deladect.detection.delamination`
 
-Typical workflow
-----------------
-The snippet below mirrors the layout of ``tests/test_DelaDect_crack_detection.py`` and shows
-how to run a minimal crack-detection pass on the bundled sample dataset.
+In current revisions, crack convenience helpers are exposed as function-level
+APIs, not as methods on ``Specimen``.
+
+.. currentmodule:: deladect.detection
+
+Public entry points
+-------------------
+
+Classes
+^^^^^^^
+
+.. autosummary::
+   :toctree: generated
+
+   DelaminationDetector
+   EdgeDetector
+   crack_detection
+   delamination
+
+Class walkthroughs and examples are documented in :doc:`delamination`.
+
+Functions
+^^^^^^^^^
+
+.. autosummary::
+   :toctree: generated
+
+   crack_eval
+   crack_eval_by_orientation
+   crack_eval_crossply
+   crack_eval_plus_minus
+   plot_cracks
+
+Coordinate convention
+---------------------
+Crack segments follow ``[row, col]`` ordering (equivalent to ``[y, x]``).
+
+- In memory: ``[[row0, col0], [row1, col1]]``
+- In plots: ``col`` maps to x-axis, ``row`` maps to y-axis
+
+Keep this convention when implementing custom spacing/grouping logic.
+
+Common recipes
+--------------
+
+Cross-ply crack detection (sample-1)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: python
 
     from pathlib import Path
-    from deladect.detection import Specimen
 
-    data_root = Path("example_images") / "sample-1"
-    specimen = Specimen(
+   from deladect.detection import crack_eval_crossply
+   from deladect.specimen import Specimen
+   from skimage.io import imread
+
+    data_root = Path("specimen_examples") / "sample-1"
+    frame_paths = sorted(data_root.glob("*.png"))
+
+    specimen = Specimen.from_cross_ply(
         name="sample-1",
-        dimensions={"width": 20.13, "thickness": 2.27},
-        scale_px_mm=41.033,
-        path_cut=data_root / "cut",
-        path_upper_border=data_root / "upper",
-        path_lower_border=data_root / "lower",
-        path_middle=data_root / "middle",
+        scale_px_mm=41.03328366,
+        path_full=str(data_root),
         sorting_key="_sc",
         image_types=["png"],
+        auto_init_stacks=False,
+        results_root="results",
+        avg_crack_width_px=8.0,
     )
 
-    cracks, rho, theta = specimen.crack_eval(
-        theta_fd=0,
-        background=True,
-        export_images=True,
-        save_cracks=True,
-        output_dir="reports/sample-1",
+    specimen.path_full_list = [str(path) for path in frame_paths]
+    specimen.image_stack_full = [imread(str(path)) for path in frame_paths]
+
+    crack_results = crack_eval_crossply(specimen, export_images=True, save_cracks=True)
+
+    print(crack_results.keys())  # typically dict_keys(['0', '90'])
+    print(crack_results["0"]["metrics"].head())
+
+Combined delamination
+^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+   from deladect.detection import DelaminationDetector
+
+    interface = specimen.add_interface(name="i0", upper_ply_index=0, lower_ply_index=1)
+    detector = DelaminationDetector(specimen, interface)
+
+    # diffuse ROIs usually work best with both cross-ply crack families
+    cracks_all = Specimen.join_cracks(
+        crack_results["0"]["cracks"],
+        crack_results["90"]["cracks"],
     )
 
-    specimen.upload_experimental_data(data_root / "experimental_data.csv")
-    rho_mm = specimen.pixels_to_length(rho)
-    specimen.export_rho(rho_mm, folder_name="reports/sample-1")
+    combined = detector.detect_both_delaminations(
+        cracks=cracks_all,
+        save_masks=True,
+        save_metrics=True,
+        edge_exclusion_px=5,
+    )
 
-Advanced scenarios
-------------------
-``Specimen`` includes helpers for multi-angle laminates and post-processing:
+   print(combined["paths"]["metrics"])
 
-- :meth:`~deladect.detection.Specimen.crack_eval_crossply` detects and overlays cracks at
-  0-degree and 90-degree for cross-ply configurations while optionally caching intermediate
-  results.
-- :meth:`~deladect.detection.Specimen.crack_eval_plus_minus` handles plus/minus laminates and
-  can add an extra transverse layer for post-processing when required.
-- :meth:`~deladect.detection.Specimen.crack_filtering_postprocessing` combines ordering,
-  grouping, filtering, and crack-spacing estimation (with outlier rejection) so you can tidy
-  the crack catalogue before exporting.
+Troubleshooting quick notes
+---------------------------
+- ``ImportError: crackdect is required``: install and activate an environment
+  compatible with CrackDect and NumPy.
+- Missing overlays/masks: ensure ``save_overlays=True`` and/or
+  ``save_masks=True`` in workflow calls.
+- Unexpected crack direction: verify ply orientation metadata and the resulting
+  ``theta`` mapping.
+- Diffuse over-detection: increase ``reference_skip`` and reduce
+  ``post_threshold_closing_scale`` before changing many other parameters.
 
 See also
 --------
-- :doc:`examples/getting_started` for a narrated first run through the sample dataset.
-- :doc:`examples/crack_detection` for practical testing flows, plots, and reporting ideas.
+- :doc:`delamination` for edge, diffuse, combined, and multi-interface logic.
+- :doc:`examples/crack_detection` for end-to-end crack examples.
+- :doc:`examples/delamination_multi_interface` for sample-5 multi-interface workflow.
+- :doc:`results_storage` for NPZ/metadata storage conventions.
 
-API reference
--------------
-The sections above highlight the most common routines. The full API is documented below for
-quick lookup.
-
-.. automodule:: deladect.detection
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :member-order: bysource
+API details are available in autogenerated pages under ``docs/source/generated``.

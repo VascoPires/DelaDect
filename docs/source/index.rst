@@ -1,55 +1,103 @@
 DelaDect: Optical Delamination Detection in Fiber-Reinforced Polymers
 =====================================================================
 
-.. image:: _static/logo.png
-   :alt: DelaDect Logo
+.. image:: deladect_logo.svg
+   :alt: DelaDect logo
+   :width: 320
    :align: center
 
-DelaDect is a Python package for detecting delaminations and cracks in
-fiber-reinforced polymers using optical methods.  It builds on the CrackDect project and
-adds higher-level workflows, improved shift-correction tooling, and richer reporting.
+DelaDect is a Python package for quantitative damage analysis in optical image
+stacks of fiber-reinforced composites. The workflow combines:
+
+- Stage I crack detection (CrackDect-based)
+- Stage II edge and diffuse delamination detection
+- reusable preprocessing caches and reproducible exports (masks, overlays, CSV)
+
+.. image:: _static/laminate_3d.gif
+   :alt: Animated DelaDect visualization
+   :width: 720
+   :align: center
+
+If you are new here, start with :doc:`examples/getting_started` or :doc:`methodology`.
+
+
+Quick Start
+-----------
+
+It is recommended to use DelaDect in an isolated environment (venv or Conda) so dependencies remain
+reproducible and separate from the system's Python.
 
 Installation
-------------
+~~~~~~~~~~~~
+Supported Python is ``>=3.9`` and the recommended version is ``3.10``.
+This repository is currently tested with ``Python 3.10``.
 
-Create an isolated environment, install the dependencies, and add DelaDect in editable
-mode while you explore the examples:
+Check your current Python version:
 
 .. code-block:: bash
 
-   python -m venv .venv
-   .venv\\Scripts\\activate      # On macOS/Linux use: source .venv/bin/activate
-   pip install --upgrade pip
-   pip install -e .[dev]
+   $ python --version
 
-The :doc:examples/getting_started guide expands on the commands above and walks through
-your first analysis run.
+Create and activate a fresh environment:
+
+.. code-block:: bash
+
+   # Option A: Conda
+   $ conda create -n deladect python=3.10 -y
+   $ conda activate deladect
+
+   # Option B: venv
+   $ python -m venv .venv
+   $ .venv\Scripts\activate        # Windows
+   # $ source .venv/bin/activate    # Linux/macOS
+
+Then, install DelaDect and dependencies:
+
+.. code-block:: bash
+
+   $ pip install deladect
+
+
+.. _prerequisites:
 
 Prerequisites
 -------------
 
-- CrackDect 0.2
-- scikit-image 0.18+
-- numpy >= 1.19
-- scipy 1.6+
-- matplotlib >= 3.3
-- sqlalchemy 1.3+
-- numba 0.52+
-- psutil 5.8+
+DelaDect dependencies are installed automatically. 
 
+- `CrackDect <https://pypi.org/project/crackdect/>`_
+- `NumPy 1.23.5 <https://numpy.org/>`_
+- `SciPy 1.10.0 <https://scipy.org/>`_
+- `Pandas 1.3.5 <https://pandas.pydata.org/>`_
+- `Matplotlib 3.7.5 <https://matplotlib.org/>`_
+- `scikit-image 0.18.1 <https://scikit-image.org/>`_
+- `Pillow 8.4.0 <https://python-pillow.org/>`_
 
-------------------
+Documentation roadmap
+---------------------
+- Start with :doc:`examples/getting_started` for a first full run.
+- Use :doc:`detection` and :doc:`delamination` for algorithm and API details.
+- Use :doc:`parameter_truth_table` for default values and where they apply.
+- Use :doc:`Image_pre_processing` for normalization strategy tuning.
+- Use :doc:`results_storage` when integrating outputs into downstream scripts.
+
 
 .. toctree::
    :maxdepth: 2
    :caption: User Documentation
 
-   image_pre_processing
+   methodology
+   Image_pre_processing
+   parameter_truth_table
+   image_handling
+   examples/shift_correction
    detection
-   utils
    delamination
+   results_storage
+   utils
 
 
+Examples
 --------
 
 .. toctree::
@@ -57,16 +105,32 @@ Prerequisites
    :caption: Examples
 
    examples/getting_started
-   image_handling
-   examples/shift_correction
+   examples/save_reload_results
    examples/crack_detection
+   examples/delamination_multi_interface
+
+
+API Reference
+-------------
+
+.. currentmodule:: deladect
+
+.. autosummary::
+   :toctree: generated
+
+   detection
+   specimen
+   utils
+
 
 Project Information
 -------------------
 
 Authors
 ~~~~~~~
-- Vasco D. C. Pires
+The current code base was developed by
+`Vasco D. C. Pires <www.vascodcpires.com/>`_ with affiliation to the
+`Institute Designing Plastics and Composite Materials (TU Leoben) <https://www.kunststofftechnik.at/en/konstruieren>`_.
 
 License
 ~~~~~~~

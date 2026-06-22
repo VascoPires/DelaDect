@@ -1,107 +1,163 @@
 Crack Detection
-=======================
+===============
 
-The integration test ``tests/test_DelaDect_crack_detection.py`` doubles as a handy recipe
-book for the different evaluation modes. This page highlights the main patterns and how to
-adapt them for your own runs.
+This page covers the function-level crack API.
 
-Basic evaluation
-----------------
+Coordinate convention: crack endpoints are stored as ``[row, col]`` (``[y, x]``).
+When plotted, columns map to the horizontal axis.
+
+Input expectations
+------------------
+- The image stack should be shift-corrected (or otherwise stable frame-to-frame).
+- Each target orientation should have at least one configured ply.
+- Ply metadata should include realistic crack width/length defaults.
+- Use ``results_dir`` for output roots.
+
+Basic single-orientation run
+----------------------------
 
 .. code-block:: python
 
     from pathlib import Path
 
-    data_root = Path("example_images") / "sample-1"
-    test_dir = Path("reports") / "basic_functionality"
-    test_dir.mkdir(parents=True, exist_ok=True)
+    from deladect.detection import crack_eval
+    from deladect.specimen import Specimen
+    from skimage.io import imread
 
-    cracks, rho, theta = specimen.crack_eval(
-        theta_fd=0,
-        background=True,
+    data_root = Path("my_specimen_images") / "sample-1"
+
+    specimen = Specimen(
+        name="sample-1",
+        scale_px_mm=41.033,
+        path_full=str(data_root),
+        sorting_key="_sc",
+        image_types=["png"],
+        auto_init_stacks=False,
+        results_root="results",
+    )
+    specimen.path_full_list = [str(p) for p in sorted(data_root.glob("*.png"))]
+    specimen.image_stack_full = [imread(path) for path in specimen.path_full_list]
+
+    ply = specimen.add_ply(
+        name="ply_0",
+        orientation_deg=0.0,
+        avg_crack_width_px=8.0,
+        min_crack_length_px=20.0,
+    )
+
+    result = crack_eval(
+        specimen,
+        ply=ply,
         export_images=True,
-        color_cracks='black',
-        image_stack_orig=True,
-        output_dir=str(test_dir),
+        save_cracks=True,
+        results_dir="results",
+    )
+    cracks = result["cracks"]
+    rho = result["densities"]
+    th = result["thresholds"]
+    print(result["metrics"].head())
+
+Plus/minus convenience wrapper
+------------------------------
+
+.. code-block:: python
+
+    from deladect.detection import crack_eval_plus_minus
+
+    specimen.add_ply(name="ply_p45", orientation_deg=45.0, avg_crack_width_px=8.0, min_crack_length_px=20.0)
+    specimen.add_ply(name="ply_m45", orientation_deg=-45.0, avg_crack_width_px=8.0, min_crack_length_px=20.0)
+
+    pm = crack_eval_plus_minus(
+        specimen,
+        theta=45.0,
+        transverse_layer=True,
+        export_images=False,
+        save_cracks=True,
     )
 
-    rho_mm = specimen.pixels_to_length(rho)
-    specimen.export_rho_th(rho_mm, theta, folder_name=str(test_dir),
-                           file_name="crack_density_results.csv")
-    specimen.save_cracks(
-        cracks=cracks,
-        folder_name=str(test_dir),
-        file_name="detected_cracks.pkl",
+    print(pm.keys())  # e.g. dict_keys(['45', '-45', '90'])
+
+Cross-ply convenience wrapper
+-----------------------------
+
+.. code-block:: python
+
+    from deladect.detection import crack_eval_crossply
+
+    # add the 90-degree ply before running this convenience wrapper
+    specimen.add_ply(
+        name="ply_90",
+        orientation_deg=90.0,
+        avg_crack_width_px=8.0,
+        min_crack_length_px=20.0,
     )
 
-    specimen.upload_experimental_data(data_root / "experimental_data.csv")
-    specimen.export_rho_th(rho_mm, theta, folder_name=str(test_dir),
-                           file_name="crack_density_results_with_strain.csv")
+    crossply = crack_eval_crossply(
+        specimen,
+        export_images=True,
+        save_cracks=True,
+        results_dir="results",
+    )
 
-- Saves per-frame crack overlays inside ``reports/Identified Cracks`` when
-  ``export_images`` is enabled.
-- Pickles the detected cracks with :meth:`~deladect.detection.Specimen.save_cracks` so you
-  can reuse them in later sessions.
-- Converts ``rho`` into millimetres through
-  :meth:`~deladect.detection.Specimen.pixels_to_length` and writes CSVs with
-  :meth:`~deladect.detection.Specimen.export_rho_th` (optionally after
-  :meth:`~deladect.detection.Specimen.upload_experimental_data`).
+    cracks_0 = crossply["0"]["cracks"]
+    cracks_90 = crossply["90"]["cracks"]
 
-Cross-ply laminates
+Post-processing and spacing
+---------------------------
+Post-processing utilities are available in the crack submodule.
+
+.. code-block:: python
+
+    from deladect.detection.crack_detection import (
+        crack_filtering_postprocessing,
+        pixels_to_length,
+    )
+
+    spacing_data_px, filtered_cracks = crack_filtering_postprocessing(
+        specimen,
+        cracks_90,
+        avg_crack_grouping_th_px=50,
+        crack_length_th=20,
+        remove_outliers=True,
+        grouping=True,
+    )
+
+    spacing_data_mm = pixels_to_length(spacing_data_px, scale_px_mm=specimen.scale_px_mm)
+
+Visual sanity check
 -------------------
 
 .. code-block:: python
 
-    cracks_90, rho_90, th_90, cracks_0, rho_0, th_0 = specimen.crack_eval_crossply(
-        export_images=True,
-        save_cracks=True,
-        output_dir=str(test_dir),
+    from deladect.detection import plot_cracks
+
+    fig, ax = plot_cracks(
+        image=specimen.image_stack_full[-1],
+        cracks=cracks_90[-1],
+        color="red",
+        background_flag=True,
     )
+    fig.savefig("results/sample-1_last_frame_cracks.png")
 
-- Caches ``cracks_0`` and ``cracks_90`` in ``Crack Detection/Identified Cracks`` so
-  follow-up runs can skip detection and dive straight into analysis.
-- Pair the output with :func:`~deladect.utils.DataProcessor.join_cracks` to build plots that
-  contrast transverse and longitudinal cracks.
+What to inspect after a run
+---------------------------
+- ``results/<specimen>/cracks/ply_*/plots/`` for per-frame overlays.
+- ``results/<specimen>/cracks/ply_*/data/`` for persisted crack bundles.
+- crack-density trends (``rho``) for monotonicity and sudden anomalies.
 
-Post-processing and spacing analysis
-------------------------------------
+Tip for diffuse-delamination workflows
+--------------------------------------
+When using cracks as diffuse ROI input, merge both orientation families for
+cross-ply stacks:
 
 .. code-block:: python
 
-    processed_data, filtered_cracks = specimen.crack_filtering_postprocessing(
-        cracks_90,
-        avg_crack_grouping_th_px=50,
-        crack_length_th=threshold,
-        remove_outliers=True,
-    )
-    results_mm = specimen.pixels_to_length(processed_data)
-    specimen.export_crack_spacing(results_mm, folder_name=str(test_dir))
+    cracks_all = Specimen.join_cracks(crossply["0"]["cracks"], crossply["90"]["cracks"])
 
-- Groups nearby segments to avoid double counting (configurable via
-  ``avg_crack_grouping_th_px``).
-- Removes outliers with an interquartile-range filter when ``remove_outliers`` is true.
-- Exports crack-spacing summaries already converted to millimetres.
+Suggested figure placeholders
+-----------------------------
+Create these images under ``docs/source/_static/cracks/`` and add with ``.. figure::``:
 
-Visual reporting
-----------------
-The test suite also shows how to overlay multiple crack catalogues on a single frame using
-Matplotlib:
-
-.. code-block:: python
-
-    joined_cracks = specimen.join_cracks(cracks_90, cracks_0)
-    fig, ax = specimen.plot_cracks(
-        image=specimen.image_stack_cut[-1],
-        cracks=joined_cracks[-1],
-        color='red'
-    )
-    fig.savefig(test_dir / "all_cracks_combined.png")
-
-Use this pattern to build comparison panels, animations, or quick quality-control dashboards
-before running larger batches.
-
-Next steps
-----------
-- Explore :doc:`../detection` for the complete parameter list.
-- Review the ``tests/test_results`` artefacts generated by ``pytest`` to see folder names and
-  outputs that you can mirror in your own workflow.
+1. ``sample1_cracks_overlay.png`` - representative crack overlay frame
+2. ``sample1_density_curve.png`` - crack-density vs frame index plot
+3. ``sample1_spacing_hist.png`` - spacing distribution after post-processing

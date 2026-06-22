@@ -6,7 +6,8 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / 'src'))
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
@@ -18,7 +19,15 @@ author = 'Vasco D. C. Pires'
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-extensions = ['sphinx.ext.autodoc', 'sphinx.ext.napoleon']
+extensions = [
+    'sphinx.ext.autodoc',
+    'sphinx.ext.napoleon',
+    'sphinx.ext.autosummary',
+    'sphinx.ext.viewcode',
+]
+
+autosummary_generate = True
+add_module_names = False
 
 templates_path = ['_templates']
 exclude_patterns = []
@@ -34,3 +43,12 @@ html_logo = 'deladect_logo.svg'
 html_theme_options = {
     'logo_only': True
 }
+
+
+def setup(app):
+    """Register custom CSS for all supported Sphinx versions."""
+    add_css = getattr(app, "add_css_file", None)
+    if add_css is not None:
+        add_css("custom.css")
+    else:  # pragma: no cover - compatibility with very old Sphinx
+        app.add_stylesheet("custom.css")
