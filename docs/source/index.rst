@@ -2,11 +2,11 @@ DelaDect: Optical Delamination Detection in Fiber-Reinforced Polymers
 =====================================================================
 
 DelaDect is a Python package for quantitative damage analysis in 
-fiber-reinforced polymers. Out of the box, the tool is able to perform the fo
+fiber-reinforced polymers. Out of the box, the tool is able to perform the detection of cracks
+and delamination from a sequence of images. 
 
-- Stage I crack detection (CrackDect-based)
-- Stage II edge and diffuse delamination detection
-- reusable preprocessing caches and reproducible exports (masks, overlays, CSV)
+The tool is capable of destinguishing between diffuse and edge delamination 
+and can also destinguish delamination between multiple interfaces under certain conditions (see :doc:`methodology` for details). 
 
 .. image:: _static/sample5_sequence.gif
    :alt: DelaDect visualization
@@ -80,7 +80,8 @@ Documentation roadmap
    :caption: User Guide
    :hidden:
 
-   examples/getting_started
+   quick_start
+   prerequisites
    methodology
    image_handling
    Image_pre_processing
@@ -92,6 +93,7 @@ Documentation roadmap
    :caption: Examples
    :hidden:
 
+   examples/getting_started
    examples/crack_detection
    examples/delamination_multi_interface
    examples/save_reload_results
@@ -99,15 +101,9 @@ Documentation roadmap
 
 .. toctree::
    :maxdepth: 1
-   :caption: API Reference
+   :caption: Project Information
    :hidden:
 
-   detection
-   delamination
-   utils
-   generated/deladect.detection
-   generated/deladect.specimen
-   generated/deladect.utils
 
 
 Project Information
