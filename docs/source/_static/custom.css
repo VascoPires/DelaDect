@@ -1,0 +1,59 @@
+/*
+Language-specific code block styling
+
+- Python blocks -> black text on light green background
+- Bash/shell/console blocks -> black text on light yellow background
+
+This targets both the outer wrapper and inner pygments nodes used by
+sphinx_rtd_theme.
+*/
+
+:root {
+  --deladect-python-bg: #e8f5e9;
+  --deladect-shell-bg: #fff9db;
+  --deladect-code-fg: #000000;
+}
+
+/* Python */
+.rst-content div.highlight-python,
+.rst-content div.highlight-python3,
+.rst-content div.highlight-python .highlight,
+.rst-content div.highlight-python3 .highlight,
+.rst-content div.highlight-python pre,
+.rst-content div.highlight-python3 pre {
+  background: var(--deladect-python-bg) !important;
+}
+
+.rst-content div.highlight-python pre,
+.rst-content div.highlight-python3 pre,
+.rst-content div.highlight-python pre *,
+.rst-content div.highlight-python3 pre * {
+  color: var(--deladect-code-fg) !important;
+}
+
+/* Bash / shell / console */
+.rst-content div.highlight-bash,
+.rst-content div.highlight-shell,
+.rst-content div.highlight-console,
+.rst-content div.highlight-sh,
+.rst-content div.highlight-bash .highlight,
+.rst-content div.highlight-shell .highlight,
+.rst-content div.highlight-console .highlight,
+.rst-content div.highlight-sh .highlight,
+.rst-content div.highlight-bash pre,
+.rst-content div.highlight-shell pre,
+.rst-content div.highlight-console pre,
+.rst-content div.highlight-sh pre {
+  background: var(--deladect-shell-bg) !important;
+}
+
+.rst-content div.highlight-bash pre,
+.rst-content div.highlight-shell pre,
+.rst-content div.highlight-console pre,
+.rst-content div.highlight-sh pre,
+.rst-content div.highlight-bash pre *,
+.rst-content div.highlight-shell pre *,
+.rst-content div.highlight-console pre *,
+.rst-content div.highlight-sh pre * {
+  color: var(--deladect-code-fg) !important;
+}
