@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/source/deladect_logo_white.svg" alt="DelaDect logo" width="340">
+  <img src="docs/source/deladect_logo_white.svg" alt="DelaDect logo" width="600">
 </p>
 
 
