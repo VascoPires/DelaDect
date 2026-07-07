@@ -2,10 +2,11 @@
   <img src="docs/source/deladect_logo_white.svg" alt="DelaDect logo" width="340">
 </p>
 
-
+<p align="center">
 [![Documentation](https://img.shields.io/badge/docs-online-blue?logo=readthedocs)](https://deladect.readthedocs.io)
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/VascoPires/DelaDect/HEAD)
 [![License](https://img.shields.io/github/license/VascoPires/DelaDect)](LICENSE)
+</p>
 
 <p align="center">
   <img src="docs/source/_static/sample5_sequence.gif" alt="DelaDect visualization" width="720">
