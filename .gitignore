@@ -138,3 +138,4 @@ dmypy.json
 # Claude Code / memsearch
 .claude/
 .memsearch/
+.vscode/
