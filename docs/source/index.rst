@@ -66,13 +66,15 @@ DelaDect dependencies are installed automatically.
 - `scikit-image ≥ 0.18.1 <https://scikit-image.org/>`_
 - `Pillow ≥ 8.4.0 <https://python-pillow.org/>`_
 
-Documentation roadmap
+Documentation index
 ---------------------
-- Start with :doc:`examples/getting_started` for a first full run and to try some examples.
+- In :doc:`examples/getting_started` you will find some step-by-step examples to get you started with DelaDect.
+- In :doc:`methodology` you will find a detailed description of the algorithms and methods used in DelaDect.
+
 - Use :doc:`detection` and :doc:`delamination` for algorithm and API details.
-- Use :doc:`parameter_truth_table` for a full parameter list and default values.
+- Use :doc:`parameter_list` for a full parameter list and default values.
 - Use :doc:`Image_pre_processing` for normalization strategy tuning.
-- Use :doc:`results_storage` when integrating outputs into downstream scripts.
+.
 
 
 .. toctree::
@@ -83,9 +85,10 @@ Documentation roadmap
    quick_start
    prerequisites
    methodology
+   shift_correction
    image_handling
    Image_pre_processing
-   parameter_truth_table
+   parameter_list
    results_storage
 
 .. toctree::
@@ -97,7 +100,7 @@ Documentation roadmap
    examples/crack_detection
    examples/delamination_multi_interface
    examples/save_reload_results
-   examples/shift_correction
+  
 
 .. toctree::
    :maxdepth: 1
