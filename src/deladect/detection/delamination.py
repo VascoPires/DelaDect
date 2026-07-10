@@ -979,7 +979,7 @@ class DelaminationDetector:
             crack_frames_normalized,
             selected_indices_list,
             avg_crack_width_px=avg_crack_width_px,
-            diffuse_params=diffuse_params or {},
+            diffuse_params=self._resolve_diffuse_params(diffuse_params),
             max_center_px=max_center_px,
             max_angle_deg=max_angle_deg,
             max_cost=max_cost,
