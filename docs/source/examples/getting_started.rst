@@ -2,7 +2,9 @@ Getting Started
 ===============
 
 This walkthrough takes you from a fresh clone to a first crack and
-delamination result using bundled sample data.
+delamination result using bundled sample data. A fully runnable version of
+this walkthrough (plus a bit more exploration) is available as a Jupyter
+notebook at ``notebooks/getting_started.ipynb``.
 
 1) Environment setup
 --------------------
@@ -17,6 +19,9 @@ delamination result using bundled sample data.
 
 2) First crack run (sample images)
 -----------------------------------
+
+``Specimen.from_cross_ply`` is convenience sugar: it builds a ``Specimen``
+and automatically adds two plies at ``[0, 90]`` degrees for you.
 
 .. code-block:: python
 
@@ -52,8 +57,15 @@ delamination result using bundled sample data.
 
    print(crack_results.keys())
 
-4) First delamination run (combined edge + diffuse)
----------------------------------------------------
+3) First delamination run
+--------------------------
+
+``DelaminationDetector`` exposes edge and diffuse detection as two peer
+sub-detectors, plus a combined orchestrator that arbitrates overlaps:
+
+- ``detector.edge.detect_primary(...)`` - edge-only detection
+- ``detector.diffuse.diffuse_delamination(...)`` - diffuse-only detection (crack-guided ROIs)
+- ``detector.detect_both_delaminations(...)`` - combined edge + diffuse
 
 .. code-block:: python
 
@@ -76,6 +88,17 @@ delamination result using bundled sample data.
        reference_skip=1,
    )["cache_paths"]
 
+For edge-only or diffuse-only results:
+
+.. code-block:: python
+
+   edge_result = detector.edge.detect_primary(processed_cache_paths=cache_paths, debug=True)
+   diffuse_result = detector.diffuse.diffuse_delamination(cracks=cracks, processed_cache_paths=cache_paths, debug=True)
+
+For the combined workflow used in most analyses:
+
+.. code-block:: python
+
    result = detector.detect_both_delaminations(
        cracks=cracks,
        avg_crack_width_px=8.0,
@@ -93,7 +116,7 @@ delamination result using bundled sample data.
 
    print(result["paths"])
 
-5) Save and reload specimen + artefact references
+4) Save and reload specimen + artefact references
 -------------------------------------------------
 
 .. code-block:: python
@@ -111,6 +134,38 @@ delamination result using bundled sample data.
    )
 
    print(specimen_reloaded.name)
+
+5) Building a specimen manually
+--------------------------------
+
+``Specimen.from_cross_ply`` is sugar over three calls: build a plain
+``Specimen``, then call ``add_ply`` once per orientation. You can do this
+yourself - useful for laminates that aren't a simple ``[0, 90]`` cross-ply,
+or when you want explicit control over ply/interface naming:
+
+.. code-block:: python
+
+   specimen_manual = Specimen(
+       name="sample-1-manual",
+       scale_px_mm=41.03328366,
+       path_full=str(data_root),
+       sorting_key="_sc",
+       image_types=["png"],
+       auto_init_stacks=False,
+       results_root="results",
+       avg_crack_width_px=8.0,
+   )
+   specimen_manual.path_full_list = [str(path) for path in frame_paths]
+   specimen_manual.image_stack_full = [imread(str(path)) for path in frame_paths]
+
+   specimen_manual.add_ply(name="ply_0", orientation_deg=0.0, avg_crack_width_px=8.0, min_crack_length_px=20.0)
+   specimen_manual.add_ply(name="ply_90", orientation_deg=90.0, avg_crack_width_px=8.0, min_crack_length_px=20.0)
+
+   interface_manual = specimen_manual.add_interface(name="i0", upper_ply_index=0, lower_ply_index=1)
+
+From here, ``crack_eval_crossply``, ``DelaminationDetector``, and everything
+else in steps 2-4 work identically on ``specimen_manual`` /
+``interface_manual``.
 
 What you should see
 -------------------
@@ -131,6 +186,7 @@ Quick validation checks
 
 Next steps
 ----------
+- ``notebooks/getting_started.ipynb`` for a fully runnable version of this walkthrough.
 - :doc:`save_reload_results` for manifest-based reload workflows.
 - :doc:`crack_detection` for full crack workflows and post-processing.
 - :doc:`delamination_multi_interface` for sample-5 multi-interface edge progression.

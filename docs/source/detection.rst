@@ -25,6 +25,7 @@ Classes
 
    DelaminationDetector
    EdgeDetector
+   DiffuseDetector
    crack_detection
    delamination
 

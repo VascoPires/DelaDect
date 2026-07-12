@@ -10,10 +10,15 @@ The API is organized around one detector instance per ``(specimen, interface)`` 
 
 - preprocessing helpers (history clamp + reference normalization)
 - edge delamination (:meth:`EdgeDetector.detect_primary`)
-- diffuse delamination (:meth:`DelaminationDetector.diffuse_delamination`)
+- diffuse delamination (:meth:`DiffuseDetector.diffuse_delamination`)
 - combined arbitration (:meth:`DelaminationDetector.detect_both_delaminations`)
 - hierarchical edge promotion across multiple interfaces
   (:meth:`EdgeDetector.detect_edge_multi`)
+
+Edge and diffuse detection are exposed as peer sub-detectors reached via
+``detector.edge`` and ``detector.diffuse`` respectively; shared infrastructure
+(preprocessing, caching, combined arbitration) lives directly on
+``DelaminationDetector``.
 
 .. currentmodule:: deladect.detection.delamination
 
@@ -25,6 +30,7 @@ Core classes
 
    DelaminationDetector
    EdgeDetector
+   DiffuseDetector
 
 Algorithm summary
 -----------------
@@ -120,7 +126,7 @@ Diffuse only
 
 .. code-block:: python
 
-    diffuse_result = detector.diffuse_delamination(
+    diffuse_result = detector.diffuse.diffuse_delamination(
         cracks=cracks,
         processed_cache_paths=cache_paths,
         save_overlays=True,
@@ -183,8 +189,8 @@ Edge primary parameters (``detect_primary(params=...)``)
 - ``pre_threshold_closing_radius`` (legacy alias for explicit closing radius)
 - ``min_object_px=0`` (remove small connected components after closing)
 
-Diffuse parameters (``diffuse_delamination(params=...)``)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Diffuse parameters (``detector.diffuse.diffuse_delamination(params=...)``)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 - ``diffuse_dx=20.0``, ``diffuse_dy=20.0``
 - ``crack_frame_policy in {"current", "reference_latest", "reference_midpoint"}``
 - ``threshold_max_samples=200000``

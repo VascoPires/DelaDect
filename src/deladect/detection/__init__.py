@@ -8,7 +8,7 @@ from .crack_detection import (
     plot_cracks,
 )
 from .crack_tracking import CrackDetection, CrackTrack, match_tracks, normalize_detections
-from .delamination import DelaminationDetector, EdgeDetector
+from .delamination import DelaminationDetector, EdgeDetector, DiffuseDetector
 
 __all__ = [
     "crack_eval",
@@ -22,4 +22,5 @@ __all__ = [
     "normalize_detections",
     "DelaminationDetector",
     "EdgeDetector",
+    "DiffuseDetector",
 ]
