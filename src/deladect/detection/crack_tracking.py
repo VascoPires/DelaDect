@@ -155,6 +155,12 @@ def match_tracks(
     max_cost:
         Assignments with cost above this value are rejected.
 
+    Raises
+    ------
+    ValueError
+        If a matching threshold is not finite, or if either distance/angle
+        threshold is non-positive.
+
     Returns
     -------
     matched : dict[int, int]
@@ -164,6 +170,16 @@ def match_tracks(
     unmatched_dets : list[int]
         Indices of detections not assigned to any track.
     """
+    max_center_px = float(max_center_px)
+    max_angle_deg = float(max_angle_deg)
+    max_cost = float(max_cost)
+    if not math.isfinite(max_center_px) or max_center_px <= 0:
+        raise ValueError("max_center_px must be a finite value greater than zero.")
+    if not math.isfinite(max_angle_deg) or max_angle_deg <= 0:
+        raise ValueError("max_angle_deg must be a finite value greater than zero.")
+    if not math.isfinite(max_cost) or max_cost < 0:
+        raise ValueError("max_cost must be a finite value greater than or equal to zero.")
+
     candidates: List[Tuple[float, int, int]] = []
     eps = 1e-6
     for ti, track in enumerate(tracks):

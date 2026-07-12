@@ -113,7 +113,7 @@ Post-processing utilities are available in the crack submodule.
         pixels_to_length,
     )
 
-    spacing_data_px, filtered_cracks = crack_filtering_postprocessing(
+    postprocess_result = crack_filtering_postprocessing(
         specimen,
         cracks_90,
         avg_crack_grouping_th_px=50,
@@ -121,8 +121,10 @@ Post-processing utilities are available in the crack submodule.
         remove_outliers=True,
         grouping=True,
     )
+    spacing_data_px = postprocess_result["records"]
+    filtered_cracks = postprocess_result["filtered_frames"]
 
-    spacing_data_mm = pixels_to_length(spacing_data_px, scale_px_mm=specimen.scale_px_mm)
+    spacing_data_mm = pixels_to_length(spacing_data_px, scale_px_mm=specimen.scale_px_mm)["values"]
 
 Visual sanity check
 -------------------
@@ -131,13 +133,13 @@ Visual sanity check
 
     from deladect.detection import plot_cracks
 
-    fig, ax = plot_cracks(
+    plot_result = plot_cracks(
         image=specimen.image_stack_full[-1],
         cracks=cracks_90[-1],
         color="red",
         background_flag=True,
     )
-    fig.savefig("results/sample-1_last_frame_cracks.png")
+    plot_result["figure"].savefig("results/sample-1_last_frame_cracks.png")
 
 What to inspect after a run
 ---------------------------

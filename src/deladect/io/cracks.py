@@ -16,7 +16,11 @@ PLY_CRACK_RESULTS_KEY = "crack_results_path"
 
 def _sanitize_name(name: str) -> str:
     """Normalize a ply name for filesystem-safe folder names."""
-    return "_".join(name.strip().split()) or "ply"
+    # Names are user-facing labels and may contain whitespace, slashes, or
+    # other path syntax.  Keep a readable identifier without allowing one
+    # label to introduce another directory level.
+    cleaned = "_".join(name.strip().split())
+    return cleaned.replace("/", "_").replace("\\", "_").replace(":", "_") or "ply"
 
 
 def _ply_base_dir(specimen: Specimen, ply: Ply, results_root: Optional[str]) -> Path:
@@ -37,9 +41,12 @@ def crack_results_subdir(
     results_root: Optional[str] = None,
 ) -> Path:
     """Return/create a standard crack subdirectory under a ply root."""
-    target = _ply_base_dir(specimen, ply, results_root) / name
-    target.mkdir(parents=True, exist_ok=True)
-    return target
+    return specimen.results_dir(
+        "cracks",
+        f"ply_{_sanitize_name(ply.name)}",
+        name,
+        results_root=results_root,
+    )
 
 
 def _resolve_folder(
@@ -51,18 +58,13 @@ def _resolve_folder(
     results_root: Optional[str],
 ) -> Path:
     """Resolve an export folder from optional override/default settings."""
-    if folder_name:
-        folder_path = Path(folder_name)
-        if folder_path.is_absolute():
-            target = folder_path
-        else:
-            base = _ply_base_dir(specimen, ply, results_root)
-            target = base / folder_name
-    else:
-        base = _ply_base_dir(specimen, ply, results_root)
-        target = base / default_subdir
-    target.mkdir(parents=True, exist_ok=True)
-    return target
+    subdir = folder_name or default_subdir
+    return specimen.results_dir(
+        "cracks",
+        f"ply_{_sanitize_name(ply.name)}",
+        subdir,
+        results_root=results_root,
+    )
 
 
 def store_ply_crack_results(ply: Ply, data: Dict[str, np.ndarray], path: Path) -> Path:

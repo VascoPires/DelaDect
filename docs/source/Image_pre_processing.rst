@@ -32,7 +32,7 @@ to persist processed frames and reuse them in later detection runs.
         reference_window=7,
         reference_skip=2,
         cache_dirname="Preprocessor_cache",
-    )
+    )["cache_paths"]
 
 Reference strategy guidance
 ---------------------------
@@ -124,16 +124,16 @@ parameter studies reproducible and avoids re-running normalization.
 
 .. code-block:: python
 
-    edge_masks, _ = detector.edge.detect_primary(
+    edge_masks = detector.edge.detect_primary(
         processed_cache_paths=cache_paths,
         save_overlays=False,
-    )
+    )["masks"]
 
-    diffuse_masks, _ = detector.diffuse_delamination(
+    diffuse_masks = detector.diffuse_delamination(
         cracks=cracks,
         processed_cache_paths=cache_paths,
         save_overlays=False,
-    )
+    )["masks"]
 
 Practical checks
 ----------------

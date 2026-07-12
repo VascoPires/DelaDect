@@ -107,24 +107,26 @@ Primary edge only
     from deladect.detection import DelaminationDetector
 
     detector = DelaminationDetector(specimen, interface)
-    edge_masks, edge_debug = detector.edge.detect_primary(
+    edge_result = detector.edge.detect_primary(
         processed_cache_paths=cache_paths,
         save_overlays=True,
         overlay_view="both",
         debug=True,
     )
+    edge_masks, edge_debug = edge_result["masks"], edge_result["debug"]
 
 Diffuse only
 ^^^^^^^^^^^^
 
 .. code-block:: python
 
-    diffuse_masks, diffuse_debug = detector.diffuse_delamination(
+    diffuse_result = detector.diffuse_delamination(
         cracks=cracks,
         processed_cache_paths=cache_paths,
         save_overlays=True,
         debug=True,
     )
+    diffuse_masks, diffuse_debug = diffuse_result["masks"], diffuse_result["debug"]
 
 Combined edge + diffuse
 ^^^^^^^^^^^^^^^^^^^^^^^

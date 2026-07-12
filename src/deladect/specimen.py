@@ -245,7 +245,12 @@ class Specimen:
     image_stack_middle: Optional[Any] = field(init=False, default=None)
 
     def __post_init__(self) -> None:
-        """Validates the stack configuration, load stacks, and optional metadata."""
+        """Validate the stack configuration and load optional metadata.
+
+        Construction is intentionally in-memory: creating a :class:`Specimen`
+        never creates result folders or writes a configuration file.  Call
+        :meth:`save_config` when the specimen definition is complete.
+        """
         backend = (self.stack_backend or "auto").lower()
         if backend not in {"auto", "memory", "sql"}:
             raise ValueError('stack_backend must be "auto", "memory", or "sql"')
@@ -254,7 +259,6 @@ class Specimen:
         self._sql_stack_kwargs = dict(self.sql_stack_kwargs or {})
         self._image_types_normalized = self._normalize_image_types(self.image_types)
         self._results_root = self._build_results_root(self.results_root)
-        self._results_root.mkdir(parents=True, exist_ok=True)
 
         if self.auto_init_stacks:
             self._initialize_image_stacks()
@@ -266,8 +270,6 @@ class Specimen:
 
         self._normalize_interface_indices()
 
-        self.save_config()
-
     def _build_results_root(self, results_root: Optional[str]) -> Path:
         """Builds the the specimen results root path. This is just a pure path
         builder. To not be confused with the other results methods.
@@ -277,9 +279,32 @@ class Specimen:
             base = Path("results").resolve() if configured is None else Path(configured).resolve()
         else:
             base = Path(results_root).resolve()
-        if base.name != self.name:
-            base = base / self.name
+        specimen_name = self._validate_result_component(self.name, label="specimen name")
+        if base.name != specimen_name:
+            base = base / specimen_name
         return base
+
+    @staticmethod
+    def _validate_result_component(value: str, *, label: str) -> str:
+        """Return one safe relative directory component.
+
+        Result-directory components are identifiers, not arbitrary paths.  In
+        particular, accepting ``..`` or an absolute path would allow callers
+        to write outside the specimen's configured result root.
+        """
+        component = str(value).strip()
+        path = Path(component)
+        if (
+            not component
+            or path.is_absolute()
+            or path.drive
+            or component in {".", ".."}
+            or len(path.parts) != 1
+        ):
+            raise ValueError(
+                f"{label} must be one non-empty relative path component; got {value!r}."
+            )
+        return component
 
     def resolve_results_root(self, results_root: Optional[str] = None) -> Path:
         """Returns the base results folder for this specimen. In this folder
@@ -290,11 +315,15 @@ class Specimen:
         return base
     
     def results_dir(self, *parts: str, results_root: Optional[str] = None) -> Path:
-        """Returns a writable results directory for this specimen."""
+        """Return a writable directory contained in this specimen's result root.
+
+        Each ``parts`` entry must be a single relative directory component.
+        Use ``results_root`` to intentionally select a different output root.
+        """
         base = self.resolve_results_root(results_root)
         for part in parts:
             if part:
-                base /= part
+                base /= self._validate_result_component(part, label="results directory part")
         base.mkdir(parents=True, exist_ok=True)
         return base
 
@@ -305,10 +334,15 @@ class Specimen:
     def config_path(self) -> Path:
         """Return the default configuration path under results/config."""
         config_dir = self.results_dir("config")
-        return config_dir / f"{self.name}_config.json"
+        name = self._validate_result_component(self.name, label="specimen name")
+        return config_dir / f"{name}_config.json"
 
     def save_config(self) -> Path:
-        """Persist the specimen configuration under results/config."""
+        """Persist the current specimen configuration under results/config.
+
+        This is explicit by design: mutations such as :meth:`add_ply` and
+        :meth:`add_interface` are not silently written to disk.
+        """
         from deladect.io.specimen_io import save_specimen
 
         target = self.config_path()

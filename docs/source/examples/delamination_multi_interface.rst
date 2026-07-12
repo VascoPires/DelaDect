@@ -59,7 +59,7 @@ Step 2 - Preprocess with rolling reference
         reference_window=7,
         reference_skip=2,
         cache_dirname="Preprocessor_cache",
-    )
+    )["cache_paths"]
 
 Step 3 - Run multi-interface edge detection
 -------------------------------------------

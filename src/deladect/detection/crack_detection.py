@@ -136,13 +136,14 @@ def crack_eval(
         plots_path = str(plots_dir)
         for idx, crack in enumerate(cracks_list):
             frame = stack[idx]
-            fig, ax = plot_cracks(
+            plot_result = plot_cracks(
                 frame,
                 crack,
                 background_flag=background,
                 color=color_cracks,
                 comparison=comparison,
             )
+            fig, ax = plot_result["figure"], plot_result["axes"]
             ax.set_xlabel("x [Px]")
             ax.set_ylabel("y [Px]")
             label = frame_labels[idx] if frame_labels is not None else f"{idx:04d}"
@@ -395,8 +396,8 @@ def plot_cracks(
 
     Returns
     -------
-    tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
-        Figure/axes containing the rendered crack overlay.
+    dict[str, Any]
+        ``{"figure": Figure, "axes": Axes}`` containing the rendered crack overlay.
     """
     fig, ax = plt.subplots()
     frame = image
@@ -416,7 +417,7 @@ def plot_cracks(
     ax.set_aspect("equal")
     ax.tick_params(axis="both", which="both", length=0)
     ax.grid(False)
-    return fig, ax
+    return {"figure": fig, "axes": ax}
 
 
 def _group_plies_by_orientation(
@@ -537,14 +538,19 @@ def crack_filter(crack_list: List[np.ndarray], *, length_threshold: float) -> Li
     return [crack for crack in crack_list if crack_length(crack) >= length_threshold]
 
 
-def compute_crack_spacing(crack_list: List[np.ndarray]) -> Tuple[List[float], float, float]:
+def compute_crack_spacing(crack_list: List[np.ndarray]) -> Dict[str, Any]:
     """Compute crack spacing statistics from segment midpoints.
 
     Spacing is measured along the column axis (x-axis / left-right distance).
     Crack coordinates are expected in ``[row, col]`` format.
+
+    Returns
+    -------
+    dict[str, Any]
+        ``{"spacing": list[float], "avg_spacing": float, "std_spacing": float}``.
     """
     if not crack_list:
-        return [], 0.0, 0.0
+        return {"spacing": [], "avg_spacing": 0.0, "std_spacing": 0.0}
     from deladect.utils import crack_mid_point
 
     raw_midpoints = [crack_mid_point(crack) for crack in crack_list]
@@ -560,7 +566,7 @@ def compute_crack_spacing(crack_list: List[np.ndarray]) -> Tuple[List[float], fl
     ]
     avg = float(np.mean(spacings)) if spacings else 0.0
     std = float(np.std(spacings)) if spacings else 0.0
-    return spacings, avg, std
+    return {"spacing": spacings, "avg_spacing": avg, "std_spacing": std}
 
 
 def crack_filtering_postprocessing(
@@ -574,7 +580,7 @@ def crack_filtering_postprocessing(
     remove_outliers: bool = True,
     grouping: bool = False,
     results_dir: Optional[str] = None,
-) -> Tuple[List[Dict[str, Any]], List[List[np.ndarray]]]:
+) -> Dict[str, Any]:
     """Post-process crack frames and compute spacing statistics.
 
     The routine can order cracks, apply length filtering, optionally group nearby
@@ -583,12 +589,13 @@ def crack_filtering_postprocessing(
 
     Returns
     -------
-    tuple[list[dict[str, Any]], list[list[np.ndarray]]]
-        ``(records, filtered_frames)`` where ``records`` contains per-frame spacing
-        metrics and ``filtered_frames`` stores the filtered crack lists.
+    dict[str, Any]
+        ``{"records": list[dict[str, Any]], "filtered_frames": list[list[np.ndarray]]}``
+        where ``records`` contains per-frame spacing metrics and ``filtered_frames``
+        stores the filtered crack lists.
     """
     if not cracks:
-        return [], []
+        return {"records": [], "filtered_frames": []}
 
     reference_paths = specimen.path_middle_list or specimen.path_full_list
     if not reference_paths:
@@ -626,7 +633,10 @@ def crack_filtering_postprocessing(
             else np.asarray(filtered)
         )
 
-        spacing, avg_spacing, std_spacing = compute_crack_spacing(list(grouped))
+        spacing_result = compute_crack_spacing(list(grouped))
+        spacing = spacing_result["spacing"]
+        avg_spacing = spacing_result["avg_spacing"]
+        std_spacing = spacing_result["std_spacing"]
 
         if remove_outliers and spacing:
             spacing_array = np.asarray(spacing)
@@ -648,30 +658,37 @@ def crack_filtering_postprocessing(
         filtered_frames.append(filtered)
 
         if export_images and plots_dir is not None:
-            fig, ax = plot_cracks(
+            plot_result = plot_cracks(
                 image,
                 filtered,
                 color="black",
                 background_flag=background,
             )
+            fig, ax = plot_result["figure"], plot_result["axes"]
             ax.set_xlabel("x [Px]")
             ax.set_ylabel("y [Px]")
             fig.savefig(str(plots_dir / f"filtered_{idx:04d}.png"))
             plt.close(fig)
 
-    return records, filtered_frames
+    return {"records": records, "filtered_frames": filtered_frames}
 
 
-def pixels_to_length(input_data: List[Any], *, scale_px_mm: float) -> List[Any]:
+def pixels_to_length(input_data: List[Any], *, scale_px_mm: float) -> Dict[str, Any]:
     """Convert crack-related data from pixels to millimetres.
 
     ``input_data`` can be either:
 
     - a list of numeric values (for direct scaling), or
     - a list of spacing dictionaries with ``Avg_spacing`` and ``Std_spacing`` keys.
+
+    Returns
+    -------
+    dict[str, Any]
+        ``{"values": list[Any]}`` holding the scaled values (floats or dicts,
+        matching the shape of ``input_data``'s entries).
     """
     if all(isinstance(value, (int, float)) for value in input_data):
-        return [value / scale_px_mm for value in input_data]
+        return {"values": [value / scale_px_mm for value in input_data]}
     scaled: List[Dict[str, Any]] = []
     for entry in input_data:
         if not isinstance(entry, dict):
@@ -683,7 +700,7 @@ def pixels_to_length(input_data: List[Any], *, scale_px_mm: float) -> List[Any]:
                 "Std_spacing": entry.get("Std_spacing", 0.0) / scale_px_mm,
             }
         )
-    return scaled
+    return {"values": scaled}
 
 
 # ---------------------------------------------------------------------------

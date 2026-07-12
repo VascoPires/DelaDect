@@ -68,23 +68,24 @@ delamination result using bundled sample data.
        crack_results["90"]["cracks"],
    )
 
-    cache_paths = detector.preprocess_stack_to_disk(
-        specimen.image_stack_full,
-        key="sample1_quickstart",
-        reference_mode="rolling_median",
-        reference_window=3,
-        reference_skip=1,
-    )
+   cache_paths = detector.preprocess_stack_to_disk(
+       specimen.image_stack_full,
+       key="sample1_quickstart",
+       reference_mode="rolling_median",
+       reference_window=3,
+       reference_skip=1,
+   )["cache_paths"]
 
    result = detector.detect_both_delaminations(
        cracks=cracks,
+       avg_crack_width_px=8.0,
        processed_cache_paths=cache_paths,
        diffuse_params={
            "window_diffuse": (60, 60),
        },
-        save_overlays=True,
-        overlay_view="classified",
-        save_masks=True,
+       save_overlays=True,
+       overlay_view="classified",
+       save_masks=True,
        save_metrics=True,
        edge_exclusion_px=5,
        return_masks=False,

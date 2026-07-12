@@ -312,7 +312,7 @@ class DelaminationDetector:
         params: Optional[Dict[str, Any]] = None,
         debug: bool = False,
         progress: bool = False,
-    ) -> Tuple[Dict[str, np.ndarray], Optional[Dict[str, Any]]]:
+    ) -> Dict[str, Any]:
         """Detect diffuse delamination masks using crack-guided ROIs.
 
         This workflow builds one threshold per frame from the union of ROI values,
@@ -344,8 +344,9 @@ class DelaminationDetector:
 
         Returns
         -------
-        tuple[dict[str, np.ndarray], dict[str, Any] | None]
-            ``(masks, debug_payload)`` where masks are keyed as ``frame_XXXX``.
+        dict[str, Any]
+            ``{"masks": dict[str, np.ndarray], "debug": dict[str, Any] | None}``
+            where masks are keyed as ``frame_XXXX``.
         """
         if cracks is None:
             raise ValueError("Diffuse delamination requires `cracks` to be provided.")
@@ -387,7 +388,7 @@ class DelaminationDetector:
                     cache_dirname="Preprocessor_cache",
                     reference_mode="static",
                     progress=progress,
-                )
+                )["cache_paths"]
             finally:
                 if restore_preprocess_outputs is not None:
                     self.save_preprocess_outputs = restore_preprocess_outputs
@@ -532,7 +533,7 @@ class DelaminationDetector:
 
         _progress_done("diffuse_delamination", total_frames, progress)
 
-        return diffuse_masks, debug_payloads
+        return {"masks": diffuse_masks, "debug": debug_payloads}
 
     def _diffuse_delamination_region_overrides(
         self,
@@ -588,7 +589,7 @@ class DelaminationDetector:
             reference_window=int(diffuse_params.get("reference_window") or 1),
             reference_skip=int(diffuse_params.get("reference_skip") or 0),
             progress=progress,
-        )
+        )["cache_paths"]
 
         diffuse_masks: Dict[str, np.ndarray] = {}
         debug_payloads: Optional[Dict[str, Any]] = {"frames": {}} if debug else None
@@ -726,7 +727,7 @@ class DelaminationDetector:
             _progress_update("diffuse_delamination", idx + 1, total_frames, progress_state)
 
         _progress_done("diffuse_delamination", total_frames, progress)
-        return diffuse_masks, debug_payloads
+        return {"masks": diffuse_masks, "debug": debug_payloads}
 
     def save_delamination_overlay(
         self,
@@ -737,7 +738,7 @@ class DelaminationDetector:
         masks_dirname: str = "masks",
         edge_exclusion_px: int = 5,
         save_path: Optional[Path] = None,
-    ) -> Path:
+    ) -> Dict[str, Any]:
         """Save one overlay view for a specific frame.
 
         The helper reads previously saved mask bundles from
@@ -761,8 +762,8 @@ class DelaminationDetector:
 
         Returns
         -------
-        pathlib.Path
-            Path of the written image.
+        dict[str, Any]
+            ``{"path": pathlib.Path}`` — path of the written image.
         """
         overlay_type = str(overlay_type).lower()
         if overlay_type not in {"diffuse", "edge", "both", "total_dela"}:
@@ -835,7 +836,7 @@ class DelaminationDetector:
                 raise ValueError("Combined masks are missing. Run detect_both_delaminations with save_masks=True.")
             _save_single_overlay(raw_frame, combined, save_path, self.interface.delamination_color_rgba)
 
-        return save_path
+        return {"path": save_path}
 
     def detect_both_delaminations(
         self,
@@ -945,9 +946,9 @@ class DelaminationDetector:
                 cache_dirname="Preprocessor_cache",
                 reference_mode="static",
                 progress=progress,
-            )
+            )["cache_paths"]
 
-        edge_masks, edge_debug = self.edge.detect_primary(
+        edge_result = self.edge.detect_primary(
             save_overlays=save_component_overlays,
             overlay_dirname=overlay_dirname,
             overlay_view=edge_overlay_view,
@@ -957,6 +958,7 @@ class DelaminationDetector:
             save_debug_outputs=save_edge_debug,
             progress=progress,
         )
+        edge_masks, edge_debug = edge_result["masks"], edge_result["debug"]
         from deladect.detection.crack_tracking import normalize_detections as _normalize_det
 
         if processed_stack is not None:
@@ -1263,8 +1265,14 @@ class DelaminationDetector:
         history_buffers: Dict[str, Any],
         mode: str = "running",
         window_size: Optional[int] = None,
-    ) -> List[np.ndarray]:
-        """Apply minimum history clamp across an entire stack."""
+    ) -> Dict[str, Any]:
+        """Apply minimum history clamp across an entire stack.
+
+        Returns
+        -------
+        dict[str, Any]
+            ``{"frames": list[np.ndarray]}``.
+        """
         if stack is None:
             raise ValueError("A valid image stack is required for minimum history processing.")
         if mode not in {"running", "rolling"}:
@@ -1300,7 +1308,7 @@ class DelaminationDetector:
                 history_buffers[key] = buffer
                 processed.append(np.minimum.reduce(list(buffer)))
 
-        return processed
+        return {"frames": processed}
 
     def apply_reference_normalization(
         self,
@@ -1310,8 +1318,14 @@ class DelaminationDetector:
         reference_window: int = 10,
         reference_skip: int = 0,
         output_key: Optional[str] = None,
-    ) -> Tuple[List[np.ndarray], List[Optional[np.ndarray]]]:
-        """Apply reference normalisation and return processed stacks."""
+    ) -> Dict[str, Any]:
+        """Apply reference normalisation and return processed stacks.
+
+        Returns
+        -------
+        dict[str, Any]
+            ``{"processed_frames": list[np.ndarray], "baseline_frames": list[np.ndarray | None]}``.
+        """
         if stack is None:
             raise ValueError("A valid image stack is required for reference normalisation.")
 
@@ -1371,7 +1385,7 @@ class DelaminationDetector:
         if plot_state is not None:
             _close_preprocess_figure(plot_state)
 
-        return processed_frames, baseline_frames
+        return {"processed_frames": processed_frames, "baseline_frames": baseline_frames}
 
     def normalize_delamination_stack(
         self,
@@ -1384,8 +1398,14 @@ class DelaminationDetector:
         reference_mode: str = "static",
         reference_window: int = 10,
         reference_skip: int = 0,
-    ) -> List[np.ndarray]:
-        """Apply minimum history then reference normalization, returning processed frames only."""
+    ) -> Dict[str, Any]:
+        """Apply minimum history then reference normalization, returning processed frames only.
+
+        Returns
+        -------
+        dict[str, Any]
+            ``{"frames": list[np.ndarray]}``.
+        """
         if stack is None:
             raise ValueError("A valid image stack is required for delamination normalization.")
 
@@ -1396,19 +1416,19 @@ class DelaminationDetector:
                 history_buffers=history_buffers,
                 mode=history_mode,
                 window_size=history_window_size,
-            )
+            )["frames"]
             if self.history_clamp
             else [_ensure_uint8(frame) for frame in stack]
         )
 
-        processed_frames, _ = self.apply_reference_normalization(
+        normalization_result = self.apply_reference_normalization(
             history_stack,
             reference_mode=reference_mode,
             reference_window=reference_window,
             reference_skip=reference_skip,
             output_key=key,
         )
-        return processed_frames
+        return {"frames": normalization_result["processed_frames"]}
 
     def preprocess_stack_to_disk(
         self,
@@ -1423,7 +1443,7 @@ class DelaminationDetector:
         reference_skip: int = 0,
         cache_dirname: str = "Preprocessor_cache",
         progress: bool = False,
-    ) -> List[Path]:
+    ) -> Dict[str, Any]:
         """Preprocess a stack and persist processed/baseline frames to ``.npz``.
 
         This method runs the same normalization stack used by detectors, but stores
@@ -1479,8 +1499,8 @@ class DelaminationDetector:
 
         Returns
         -------
-        list[pathlib.Path]
-            Ordered list of written ``.npz`` paths.
+        dict[str, Any]
+            ``{"cache_paths": list[pathlib.Path]}`` — ordered list of written ``.npz`` paths.
         """
         if stack is None:
             raise ValueError("A valid image stack is required for preprocessing.")
@@ -1601,7 +1621,7 @@ class DelaminationDetector:
 
         _progress_done("preprocess_stack", limit, progress)
 
-        return cache_paths
+        return {"cache_paths": cache_paths}
 
     def iter_preprocessed_cache(self, cache_paths: List[Path]):
         """Yield (index, processed_frame) from cached preprocess frames."""
@@ -2589,7 +2609,7 @@ class EdgeDetector:
         progress: bool = False,
         save_debug_outputs: bool = False,
         debug_dirname: str = "edge_accumulation_debug",
-    ) -> Tuple[Dict[str, np.ndarray], Optional[Dict[str, Any]]]:
+    ) -> Dict[str, Any]:
         """Detect primary edge delamination masks.
 
         The frame is split into upper/lower halves. The lower half is flipped so both
@@ -2623,8 +2643,9 @@ class EdgeDetector:
 
         Returns
         -------
-        tuple[dict[str, np.ndarray], dict[str, Any] | None]
-            ``(primary_masks, debug_payload)`` keyed by ``frame_XXXX``.
+        dict[str, Any]
+            ``{"masks": dict[str, np.ndarray], "debug": dict[str, Any] | None}``
+            keyed by ``frame_XXXX``.
         """
         if processed_cache_paths and processed_stack:
             raise ValueError("Provide either processed_cache_paths or processed_stack, not both.")
@@ -2666,7 +2687,7 @@ class EdgeDetector:
                     cache_dirname="Preprocessor_cache",
                     reference_mode="static",
                     progress=progress,
-                )
+                )["cache_paths"]
             finally:
                 if restore_preprocess_outputs is not None:
                     self.owner.save_preprocess_outputs = restore_preprocess_outputs
@@ -2788,7 +2809,7 @@ class EdgeDetector:
 
         _progress_done("edge_primary", total_frames, progress)
 
-        return primary_masks, debug_payloads
+        return {"masks": primary_masks, "debug": debug_payloads}
 
     def _detect_primary_region_overrides(
         self,
@@ -2839,7 +2860,7 @@ class EdgeDetector:
             reference_window=reference_window,
             reference_skip=reference_skip,
             progress=progress,
-        )
+        )["cache_paths"]
         lower_cache_paths = self.owner.preprocess_stack_to_disk(
             lower_stack,
             key=f"edge_lower_auto_{self.owner.interface.name}",
@@ -2851,7 +2872,7 @@ class EdgeDetector:
             reference_window=reference_window,
             reference_skip=reference_skip,
             progress=progress,
-        )
+        )["cache_paths"]
 
         primary_masks: Dict[str, np.ndarray] = {}
         debug_payloads: Optional[Dict[str, Any]] = {} if debug else None
@@ -3004,7 +3025,7 @@ class EdgeDetector:
             _progress_update("edge_primary", idx + 1, total_frames, progress_state)
 
         _progress_done("edge_primary", total_frames, progress)
-        return primary_masks, debug_payloads
+        return {"masks": primary_masks, "debug": debug_payloads}
 
     def detect_edge_multi(
         self,
@@ -3107,7 +3128,7 @@ class EdgeDetector:
                 reference_mode="rolling_median",
                 reference_window=_ref_window,
                 reference_skip=_ref_skip,
-            )
+            )["cache_paths"]
 
         interface_list = list(interfaces)
         if not interface_list:
