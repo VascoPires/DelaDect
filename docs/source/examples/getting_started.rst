@@ -1,52 +1,54 @@
 Getting Started
 ===============
 
-This walkthrough takes you from a fresh clone to a first crack and
-delamination result using bundled sample data. A fully runnable version of
-this walkthrough (plus a bit more exploration) is available as a Jupyter
-notebook at ``notebooks/getting_started.ipynb``.
+This first example walkthrough is designed to get you up and running with a minimal set of steps.
+A fully runnable version of this walkthrough (plus a bit more exploration) 
+is available as a Jupyter notebook at ``notebooks/getting_started.ipynb`` and is also hosted
+on binder.
 
-1) Environment setup
+1) Specimen setup
 --------------------
-
-.. code-block:: bash
-
-   python -m venv .venv
-   .venv\Scripts\activate      # Windows
-   # source .venv/bin/activate  # macOS/Linux
-   pip install --upgrade pip
-   pip install -e .[dev]
-
-2) First crack run (sample images)
------------------------------------
-
-``Specimen.from_cross_ply`` is convenience sugar: it builds a ``Specimen``
-and automatically adds two plies at ``[0, 90]`` degrees for you.
 
 .. code-block:: python
 
-   from pathlib import Path
+    from pathlib import Path
 
-   from deladect.detection import crack_eval_crossply
-   from deladect.specimen import Specimen
-   from skimage.io import imread
+    from deladect.detection import crack_eval_crossply
+    from deladect.specimen import Specimen
+    from skimage.io import imread
 
-   data_root = Path("example_images") / "sample-1" / "full"
-   frame_paths = sorted(data_root.glob("*.png"))
 
-   specimen = Specimen.from_cross_ply(
-       name="sample-1-quickstart",
-       scale_px_mm=41.03328366,
-       path_full=str(data_root),
-       sorting_key="_sc",
-       image_types=["png"],
-       auto_init_stacks=False,
-       results_root="results",
-       avg_crack_width_px=8.0,
-   )
+    # Running the sample-1 example
+    data_root = Path("example_images") / "sample-1" / "full"
+    frame_paths = sorted(data_root.glob("*.png"))
 
-   specimen.path_full_list = [str(path) for path in frame_paths]
-   specimen.image_stack_full = [imread(str(path)) for path in frame_paths]
+    # Create a specimen object from the cross-ply images
+    specimen = Specimen.from_cross_ply(
+        name="sample-1-quickstart",
+        scale_px_mm=41.03328366,
+        path_full=str(data_root),
+        sorting_key="_sc",
+        image_types=["png"],
+        results_root="results",
+        avg_crack_width_px=8.0,
+    )
+
+``Specimen.from_cross_ply`` is convenience function: it builds a ``Specimen``
+and automatically adds two plies at ``[0, 90]`` and one ``"0/90"`` interface
+between them. For more information on the Specimen class and how to create
+custom layups, see :doc:`specimen`.
+
+
+2) First crack run 
+-----------------------------------
+
+For diffuse delamination detection, we need to run crack detection first. The
+``crack_eval_crossply`` is a convenience function that runs crack detection on 
+two directions, 0° and 90°. The output of this function is a dictionary with
+the keys ``"0"`` and ``"90"``, each containing a dictionary with the detected
+cracks.
+
+.. code-block:: python
 
    crack_results = crack_eval_crossply(
        specimen,
@@ -60,18 +62,21 @@ and automatically adds two plies at ``[0, 90]`` degrees for you.
 3) First delamination run
 --------------------------
 
-``DelaminationDetector`` exposes edge and diffuse detection as two peer
-sub-detectors, plus a combined orchestrator that arbitrates overlaps:
+For this example, "Sample-1" we are performing both diffuse and edge delamination detection. 
+
 
 - ``detector.edge.detect_primary(...)`` - edge-only detection
 - ``detector.diffuse.diffuse_delamination(...)`` - diffuse-only detection (crack-guided ROIs)
 - ``detector.detect_both_delaminations(...)`` - combined edge + diffuse
 
+
+
 .. code-block:: python
 
    from deladect.detection import DelaminationDetector
 
-   interface = specimen.add_interface(name="i0", upper_ply_index=0, lower_ply_index=1)
+   # from_cross_ply already added a single "0/90" interface between the two plies
+   interface = specimen.interfaces[0]
    detector = DelaminationDetector(specimen, interface, save_preprocess_outputs=True)
 
    # Use both cross-ply crack families as diffuse ROI input

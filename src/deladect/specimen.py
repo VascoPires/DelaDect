@@ -982,6 +982,10 @@ class Specimen:
     ) -> "Specimen":
         """Create a [+θ, -θ] laminate with two plies (optionally add 90°).
 
+        One interface is added automatically between ``+θ`` and ``-θ``. If
+        ``transverse_layer`` is ``True``, a second interface is added
+        between ``-θ`` and the 90° ply.
+
         Example
         -------
         >>> Specimen.from_plus_minus(
@@ -996,7 +1000,7 @@ class Specimen:
         orientations = [angle_deg, -angle_deg]
         if transverse_layer:
             orientations.append(90.0)
-        return cls._build_with_orientations(
+        specimen = cls._build_with_orientations(
             name=name,
             orientations=orientations,
             scale_px_mm=scale_px_mm,
@@ -1008,6 +1012,8 @@ class Specimen:
             path_middle=path_middle,
             **kwargs,
         )
+        specimen._add_consecutive_interfaces(orientations)
+        return specimen
 
     @classmethod
     def from_cross_ply(
@@ -1026,6 +1032,11 @@ class Specimen:
     ) -> "Specimen":
         """Create a cross-ply laminate [0, 90].
 
+        When ``angles`` is left at its default ``[0, 90]``, a single
+        ``"0/90"`` interface is added automatically between the two plies.
+        A custom ``angles`` sequence adds no interfaces; call
+        :meth:`add_interface` yourself in that case.
+
         Example
         -------
         >>> Specimen.from_cross_ply(
@@ -1037,7 +1048,7 @@ class Specimen:
         ... )
         """
         pattern = angles or [0.0, 90.0]
-        return cls._build_with_orientations(
+        specimen = cls._build_with_orientations(
             name=name,
             orientations=pattern,
             scale_px_mm=scale_px_mm,
@@ -1049,6 +1060,9 @@ class Specimen:
             path_middle=path_middle,
             **kwargs,
         )
+        if angles is None:
+            specimen._add_consecutive_interfaces(pattern)
+        return specimen
 
     @classmethod
     def _build_with_orientations(
@@ -1080,6 +1094,22 @@ class Specimen:
         for idx, orientation in enumerate(orientations):
             specimen.add_ply(name=f"ply_{idx}", orientation_deg=float(orientation))
         return specimen
+
+    @staticmethod
+    def _format_angle(angle_deg: float) -> str:
+        """Render an orientation angle for interface naming, e.g. ``0``, ``-45``."""
+        return f"{angle_deg:g}"
+
+    def _add_consecutive_interfaces(self, orientations: Sequence[float]) -> None:
+        """Add one interface between each pair of consecutive plies.
+
+        Used by the ``from_cross_ply``/``from_plus_minus`` convenience
+        constructors, whose ply count and order are known ahead of time, so
+        interfaces can be named unambiguously from the orientation pattern.
+        """
+        for idx in range(len(orientations) - 1):
+            name = f"{self._format_angle(orientations[idx])}/{self._format_angle(orientations[idx + 1])}"
+            self.add_interface(name=name, upper_ply_index=idx, lower_ply_index=idx + 1)
 
 
 __all__ = [

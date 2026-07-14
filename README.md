@@ -24,28 +24,30 @@ DelaDect is a Python package for quantitative damage analysis in fiber-reinforce
 
 ## Installation
 
-DelaDect was coded in in `Python 3.10` with the Prerequisites defined in [Prerequisites](#prerequisites). Therefore, it is highly recomended for a new Python environment to be created.
+DelaDect was coded in `Python 3.10` with the Prerequisites defined in [Prerequisites](#prerequisites). A fresh Python environment (e.g. `conda create -n deladect python=3.10`) is strongly recommended, since DelaDect pins NumPy below 2.0 and an environment with a newer NumPy already installed can cause import errors (e.g. `No module named 'numpy.core'`).
 
 To install from source:
 
 ```bash
 git clone https://github.com/VascoPires/DelaDect.git
 cd DelaDect
-pip install
+conda create -n deladect python=3.10
+conda activate deladect
+pip install -e .
 ```
 
 ## Prerequisites
 
-Dependencies are installed automatically via `pip`. The tool uses the following libraries:
+Dependencies are installed automatically via `pip`, pinned in `pyproject.toml`. The tool uses the following libraries:
 
 - [CrackDect](https://github.com/mattdrvo/CrackDect) 0.2
-- scikit-image 0.18+
-- NumPy >= 1.19
-- SciPy 1.6+
-- Matplotlib >= 3.3
-- SQLAlchemy 1.3+
-- Numba 0.52+
-- psutil 5.8+
+- scikit-image >= 0.18.1, < 0.23
+- NumPy >= 1.23.5, < 2 (CrackDect 0.2 relies on a NumPy API removed in 2.0)
+- SciPy >= 1.10.0, < 1.13
+- Pandas >= 1.3.5, < 2.2
+- Matplotlib >= 3.7.5
+- Numba (via CrackDect)
+- psutil (via CrackDect)
 
 ## Quick Start
 

@@ -95,7 +95,8 @@ Combined delamination
 
    from deladect.detection import DelaminationDetector
 
-    interface = specimen.add_interface(name="i0", upper_ply_index=0, lower_ply_index=1)
+    # from_cross_ply already added a single "0/90" interface between the two plies
+    interface = specimen.interfaces[0]
     detector = DelaminationDetector(specimen, interface)
 
     # diffuse ROIs usually work best with both cross-ply crack families

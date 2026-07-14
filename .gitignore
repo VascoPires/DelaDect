@@ -136,6 +136,7 @@ dmypy.json
 /debug_utils.py
 /gif_maker.ipynb
 /sandbox.py
+/results/
 # Claude Code / memsearch
 .claude/
 .memsearch/
