@@ -141,3 +141,12 @@ dmypy.json
 .claude/
 .memsearch/
 .vscode/
+
+# manim render output / cache
+/animations/
+/animations/media/
+media/
+*.manim_stack_trace_cache/
+Tex/
+Text/
+partial_movie_files/

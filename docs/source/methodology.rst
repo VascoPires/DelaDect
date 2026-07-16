@@ -55,6 +55,22 @@ When preprocessed cache metadata is available, diffuse crack-frame selection can
 be aligned to the normalization reference window (for example midpoint or latest
 reference frame) instead of always using same-frame cracks.
 
+Reference normalization divides the current frame by a reference image to reduce
+illumination drift and highlight changes relative to that reference. A static
+reference uses a fixed baseline frame, while a rolling reference forms the
+denominator from a local median of previous frames so newly appearing damage is
+less likely to be absorbed into the reference.
+
+.. image:: _static/normalization/frame_division_ratio.gif
+   :alt: Static reference normalization by frame division
+   :width: 960
+   :align: center
+
+.. image:: _static/normalization/rolling_median_reference.gif
+   :alt: Rolling median reference normalization from previous frames
+   :width: 960
+   :align: center
+
 Post-threshold cleanup uses binary closing (dilation then erosion) to fill small
 holes and bridge narrow gaps.
 
