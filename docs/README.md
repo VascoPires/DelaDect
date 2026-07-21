@@ -45,7 +45,7 @@ Below, the required Python libraries are described:
     Alternatively, you can also run the Python script from any IDE.
 
 3. **Open the First Image**  
-    With the Shift Correction GUI opened, go to `File -> Open First Image` and select the first image of the series:  
+    With Shift Correction opened, go to `File -> Open First Image` and select the first image of the series:  
     ![](media/app.png)
 
 4. **Set the Output Folder**  

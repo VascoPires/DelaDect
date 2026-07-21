@@ -1,7 +1,11 @@
 import numpy as np
 import pytest
 
-from deladect.detection.delamination import _coerce_cracks_by_frame
+from deladect.detection.delamination import _coerce_cracks_by_frame, _result_key_token
+
+
+def test_result_key_token_sanitizes_interface_display_name():
+    assert _result_key_token("0/90") == "0_90"
 
 
 def test_coerce_dense_crackdect_array_by_frame():

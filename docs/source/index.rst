@@ -13,7 +13,7 @@ and can also destinguish delamination between multiple interfaces under certain 
    :width: 720
    :align: center
 
-If you are new here, start with :doc:`examples/getting_started` or :doc:`methodology` after the instalation steps below.
+If you are new here, start with :doc:`examples/getting_started` after the instalation steps below.
 
 
 Quick Start
@@ -31,18 +31,12 @@ You can check your current Python version:
 
    $ python --version
 
-Create and activate a fresh environment:
+Create and activate a new environment (either conda or venv). For example, using conda:
 
 .. code-block:: bash
 
-   # Option A: Conda
-   $ conda create -n deladect python=3.10 -y
-   $ conda activate deladect
-
-   # Option B: venv
-   $ python -m venv .venv
-   $ .venv\Scripts\activate        # Windows
-   # $ source .venv/bin/activate    # Linux/macOS
+   $ conda create -n deladect_env python=3.10 -y
+   $ conda activate deladect_env
 
 Then, install DelaDect and dependencies:
 
@@ -66,30 +60,16 @@ DelaDect dependencies are installed automatically.
 - `scikit-image ≥ 0.18.1 <https://scikit-image.org/>`_
 - `Pillow ≥ 8.4.0 <https://python-pillow.org/>`_
 
-Documentation index
----------------------
-- In :doc:`examples/getting_started` you will find some step-by-step examples to get you started with DelaDect.
-- In :doc:`methodology` you will find a detailed description of the algorithms and methods used in DelaDect.
+Documentation overview
+----------------------
 
-- Use :doc:`detection` and :doc:`delamination` for algorithm and API details.
-- Use :doc:`parameter_list` for a full parameter list and default values.
-- Use :doc:`Image_pre_processing` for normalization strategy tuning.
-.
+In the left sidebar, the documentation is divided into two main sections: Examples and User Guide. In the examples,
+you will find step-by-step walkthroughs of the main functionalities of DelaDect. In the User Guide, 
+you will find a detailed description of the algorithms and methods used in DelaDect.
 
-
-.. toctree::
-   :maxdepth: 1
-   :caption: User Guide
-   :hidden:
-
-   quick_start
-   prerequisites
-   methodology
-   shift_correction
-   image_handling
-   Image_pre_processing
-   parameter_list
-   results_storage
+There is also a binder notebooks available in this repository to run the examples without installing DelaDect. 
+You can access it at
+`Binder <https://mybinder.org/v2/gh/vascodcpires/deladect/main?labpath=notebooks/getting_started.ipynb>`_.
 
 .. toctree::
    :maxdepth: 1
@@ -97,10 +77,24 @@ Documentation index
    :hidden:
 
    examples/getting_started
-   examples/crack_detection
+   examples/advanced_options
    examples/delamination_multi_interface
    examples/save_reload_results
-  
+
+.. toctree::
+   :maxdepth: 1
+   :caption: User Guide
+   :hidden:
+
+   methodology
+   image_operations
+   shift_correction
+   image_handling
+   Image_pre_processing
+   detection
+   delamination
+   parameter_list
+   results_storage
 
 .. toctree::
    :maxdepth: 1

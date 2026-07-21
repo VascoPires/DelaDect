@@ -1,0 +1,9 @@
+name: deladect-binder
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - jupyterlab
+  - pip:
+      - -e .

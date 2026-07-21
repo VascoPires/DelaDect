@@ -1,8 +1,18 @@
-Save and Reload Results
-=======================
+04 - Save and Reload Results
+============================
 
 This example shows how to persist a specimen manifest and later reload the
 specimen together with stored crack and delamination artefacts.
+
+Its goal is reproducibility rather than image generation. It makes sense as a
+separate example because analysis and later inspection often happen in different
+Python sessions.
+
+Run ``python examples/01_getting_started.py`` first, followed by:
+
+.. code-block:: bash
+
+   python examples/04_save_reload_results.py
 
 Save workflow state
 -------------------

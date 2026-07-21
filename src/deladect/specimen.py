@@ -213,8 +213,8 @@ class Specimen:
     name: str
     scale_px_mm: float
     path_full: str
-    sorting_key: str
     image_types: List[str]
+    sorting_key: str = "_sc"
     path_upper_border: Optional[str] = None
     path_lower_border: Optional[str] = None
     path_middle: Optional[str] = None
@@ -973,8 +973,8 @@ class Specimen:
         transverse_layer: bool = False,
         scale_px_mm: float,
         path_full: str,
-        sorting_key: str,
         image_types: List[str],
+        sorting_key: str = "_sc",
         path_upper_border: Optional[str] = None,
         path_lower_border: Optional[str] = None,
         path_middle: Optional[str] = None,
@@ -1022,8 +1022,8 @@ class Specimen:
         name: str,
         scale_px_mm: float,
         path_full: str,
-        sorting_key: str,
         image_types: List[str],
+        sorting_key: str = "_sc",
         angles: Optional[List[float]] = None,
         path_upper_border: Optional[str] = None,
         path_lower_border: Optional[str] = None,
@@ -1072,8 +1072,8 @@ class Specimen:
         orientations: Sequence[float],
         scale_px_mm: float,
         path_full: str,
-        sorting_key: str,
         image_types: List[str],
+        sorting_key: str = "_sc",
         path_upper_border: Optional[str] = None,
         path_lower_border: Optional[str] = None,
         path_middle: Optional[str] = None,

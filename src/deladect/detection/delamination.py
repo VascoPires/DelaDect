@@ -18,6 +18,7 @@ from collections import deque
 import json
 import logging
 from pathlib import Path
+import re
 import warnings
 from typing import Any, Deque, Dict, Iterable, List, Optional, Sequence, Tuple, cast
 
@@ -54,6 +55,12 @@ PROGRESS_MILESTONES: Tuple[int, ...] = (25, 50, 75, 90)
 PREPROCESS_MANIFEST_FILENAME = "preprocess_manifest.json"
 DIFFUSE_CRACK_FRAME_POLICIES: Tuple[str, ...] = ("current", "reference_latest", "reference_midpoint")
 CRACK_OVERLAY_RGBA: Tuple[float, float, float, float] = (0.0, 0.0, 1.0, 0.95)
+
+
+def _result_key_token(value: Any) -> str:
+    """Convert a display label into one safe result-directory component."""
+    token = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value)).strip("._-")
+    return token or "interface"
 
 
 def _progress_init(stage: str, total_frames: int, enabled: bool) -> Optional[Dict[int, bool]]:
@@ -556,7 +563,7 @@ class DelaminationDetector:
             stack = getattr(self.specimen, "image_stack_full", None) or stacks.get("full")
             if stack is None:
                 raise ValueError("Specimen has no full image stack to preprocess.")
-            auto_key = f"both_auto_{self.interface.name}"
+            auto_key = f"both_auto_{_result_key_token(self.interface.name)}"
             processed_cache_paths = self.preprocess_stack_to_disk(
                 stack,
                 key=auto_key,
@@ -567,6 +574,8 @@ class DelaminationDetector:
             )["cache_paths"]
 
         edge_result = self.edge.detect_primary(
+            processed_cache_paths=processed_cache_paths,
+            processed_stack=processed_stack,
             save_overlays=save_component_overlays,
             overlay_dirname=overlay_dirname,
             overlay_view=edge_overlay_view,
@@ -1458,7 +1467,7 @@ class DiffuseDetector:
                 restore_preprocess_outputs = self.owner.save_preprocess_outputs
                 self.owner.save_preprocess_outputs = True
             try:
-                auto_key = f"diffuse_auto_{self.owner.interface.name}"
+                auto_key = f"diffuse_auto_{_result_key_token(self.owner.interface.name)}"
                 processed_cache_paths = self.owner.preprocess_stack_to_disk(
                     stack,
                     key=auto_key,
@@ -1655,7 +1664,7 @@ class DiffuseDetector:
         if total_frames <= 0:
             raise ValueError("No frames available for region-overridden diffuse detection.")
 
-        middle_key = f"diffuse_middle_auto_{self.owner.interface.name}"
+        middle_key = f"diffuse_middle_auto_{_result_key_token(self.owner.interface.name)}"
         middle_cache_paths = self.owner.preprocess_stack_to_disk(
             middle_stack,
             key=middle_key,
@@ -2742,7 +2751,7 @@ class EdgeDetector:
                 restore_preprocess_outputs = self.owner.save_preprocess_outputs
                 self.owner.save_preprocess_outputs = True
             try:
-                auto_key = f"edge_primary_auto_{self.owner.interface.name}"
+                auto_key = f"edge_primary_auto_{_result_key_token(self.owner.interface.name)}"
                 processed_cache_paths = self.owner.preprocess_stack_to_disk(
                     stack,
                     key=auto_key,
@@ -2914,7 +2923,7 @@ class EdgeDetector:
 
         upper_cache_paths = self.owner.preprocess_stack_to_disk(
             upper_stack,
-            key=f"edge_upper_auto_{self.owner.interface.name}",
+            key=f"edge_upper_auto_{_result_key_token(self.owner.interface.name)}",
             max_frames=total_frames,
             cache_dirname="Preprocessor_cache",
             history_mode="running",
@@ -2926,7 +2935,7 @@ class EdgeDetector:
         )["cache_paths"]
         lower_cache_paths = self.owner.preprocess_stack_to_disk(
             lower_stack,
-            key=f"edge_lower_auto_{self.owner.interface.name}",
+            key=f"edge_lower_auto_{_result_key_token(self.owner.interface.name)}",
             max_frames=total_frames,
             cache_dirname="Preprocessor_cache",
             history_mode="running",
@@ -3182,7 +3191,8 @@ class EdgeDetector:
             _p.update(primary_params or {})
             _ref_window = int(_p.get("reference_window", 10))
             _ref_skip = int(_p.get("reference_skip", 1))
-            auto_key = f"edge_multi_auto_{interfaces[0].name if interfaces else 'i0'}"
+            interface_token = _result_key_token(interfaces[0].name if interfaces else "i0")
+            auto_key = f"edge_multi_auto_{interface_token}"
             processed_cache_paths = self.owner.preprocess_stack_to_disk(
                 auto_stack,
                 key=auto_key,
@@ -3371,7 +3381,8 @@ class EdgeDetector:
             # area accumulate as secondary, catching the interior darkening event.
             primary_upper = upper_levels[0]
             primary_lower = lower_levels[0]
-            sec_ref_window = int(_sec_edge_params.get("reference_window", 7))
+            secondary_reference_params = _sec_edge_params or edge_params
+            sec_ref_window = int(secondary_reference_params.get("reference_window", 7))
             _sec_start = multi_params.get("secondary_start_frame")
 
             for frame_pos in range(len(upper_mask_frames)):
