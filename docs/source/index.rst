@@ -92,8 +92,9 @@ You can access it at
    image_handling
    Image_pre_processing
    detection
+   edge_delamination
+   diffuse_delamination
    delamination
-   parameter_list
    results_storage
 
 .. toctree::

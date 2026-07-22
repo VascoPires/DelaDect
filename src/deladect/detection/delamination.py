@@ -483,6 +483,7 @@ class DelaminationDetector:
         max_frames: Optional[int] = None,
         edge_params: Optional[Dict[str, Any]] = None,
         diffuse_params: Optional[Dict[str, Any]] = None,
+        track_cracks: bool = False,
         max_center_px: Optional[float] = None,
         max_angle_deg: float = 15.0,
         max_cost: float = 1.8,
@@ -492,19 +493,19 @@ class DelaminationDetector:
         save_edge_debug: bool = False,
         progress: bool = False,
     ) -> Dict[str, Any]:
-        """Detect edge and crack-tracking diffuse delamination, then resolve overlap.
+        """Detect edge and diffuse delamination, then resolve overlap.
 
         Overlaps are resolved in favour of edge delamination. An optional
         edge-exclusion halo can be applied before arbitration so excluded pixels are
-        counted as edge damage.  The diffuse step always uses
-        :meth:`diffuse_crack_tracking`.
+        counted as edge damage. By default, diffuse ROIs are evaluated independently
+        per frame; crack tracking can be enabled with ``track_cracks=True``.
 
         Parameters
         ----------
         cracks:
             Per-frame cracks required for diffuse ROI construction.
         avg_crack_width_px:
-            Average crack width in pixels; forwarded to :meth:`diffuse_crack_tracking`.
+            Average crack width in pixels used by diffuse detection.
         processed_cache_paths, processed_stack:
             Optional preprocessed source.  If omitted, static-reference preprocessing
             is executed automatically.  When providing pre-computed frames, they must
@@ -534,6 +535,10 @@ class DelaminationDetector:
             Optional cap on processed frames.
         edge_params, diffuse_params:
             Optional parameter overrides passed to component detectors.
+        track_cracks:
+            If ``True``, associate cracks between frames before diffuse detection.
+            If ``False``, evaluate the crack-guided diffuse ROIs independently in
+            each frame and latch the resulting masks over time. Defaults to ``False``.
         max_center_px, max_angle_deg, max_cost:
             Track-assignment thresholds forwarded to :meth:`diffuse_crack_tracking`.
         return_masks:
@@ -586,46 +591,65 @@ class DelaminationDetector:
             progress=progress,
         )
         edge_masks, edge_debug = edge_result["masks"], edge_result["debug"]
-        from deladect.detection.crack_tracking import normalize_detections as _normalize_det
+        proc_frames_list: List[np.ndarray] = []
+        selected_indices_list: List[int] = []
+        crack_frames_normalized: List[List[Any]] = []
+        cracks_by_frame = _coerce_cracks_by_frame(cracks, len(cracks))
+        crack_tracking_result: Optional[Dict[str, Any]] = None
 
-        if processed_stack is not None:
-            proc_frames_list = list(processed_stack)[:max_frames] if max_frames else list(processed_stack)
-            selected_indices_list = list(range(len(proc_frames_list)))
+        if track_cracks:
+            from deladect.detection.crack_tracking import normalize_detections as _normalize_det
+
+            if processed_stack is not None:
+                proc_frames_list = list(processed_stack)[:max_frames] if max_frames else list(processed_stack)
+                selected_indices_list = list(range(len(proc_frames_list)))
+            else:
+                assert processed_cache_paths is not None
+                paths_to_load = processed_cache_paths[:max_frames] if max_frames else processed_cache_paths
+                loaded = list(self.iter_preprocessed_cache(paths_to_load))
+                proc_frames_list = [f for _, f in loaded]
+                selected_indices_list = list(range(len(proc_frames_list)))
+
+            cracks_by_frame = _coerce_cracks_by_frame(cracks, len(proc_frames_list))
+            crack_frames_normalized = [
+                _normalize_det(cracks_by_frame[i])
+                for i in selected_indices_list
+            ]
+
+            crack_tracking_result = self.diffuse.diffuse_crack_tracking(
+                proc_frames_list,
+                crack_frames_normalized,
+                selected_indices_list,
+                avg_crack_width_px=avg_crack_width_px,
+                diffuse_params=self.diffuse._resolve_diffuse_params(diffuse_params),
+                max_center_px=max_center_px,
+                max_angle_deg=max_angle_deg,
+                max_cost=max_cost,
+                return_intermediates=return_intermediates,
+            )
+            ct_frame_masks = crack_tracking_result["frame_masks"]
+            _ref_shape = proc_frames_list[0].shape[:2] if proc_frames_list else (1, 1)
+            diffuse_masks: Dict[str, np.ndarray] = {
+                f"frame_{i:04d}": ct_frame_masks.get(i, np.zeros(_ref_shape, dtype=bool))
+                for i in selected_indices_list
+            }
         else:
-            assert processed_cache_paths is not None
-            paths_to_load = processed_cache_paths[:max_frames] if max_frames else processed_cache_paths
-            loaded = list(self.iter_preprocessed_cache(paths_to_load))
-            proc_frames_list = [f for _, f in loaded]
-            selected_indices_list = list(range(len(proc_frames_list)))
+            diffuse_result = self.diffuse.diffuse_delamination(
+                cracks=cracks,
+                processed_cache_paths=processed_cache_paths,
+                processed_stack=processed_stack,
+                save_overlays=False,
+                overlay_dirname=overlay_dirname,
+                max_frames=max_frames,
+                params=diffuse_params,
+                debug=debug,
+                progress=progress,
+            )
+            diffuse_masks = diffuse_result["masks"]
 
-        cracks_by_frame = _coerce_cracks_by_frame(cracks, len(proc_frames_list))
-        crack_frames_normalized = [
-            _normalize_det(cracks_by_frame[i])
-            for i in selected_indices_list
-        ]
-
-        crack_tracking_result: Dict[str, Any] = self.diffuse.diffuse_crack_tracking(
-            proc_frames_list,
-            crack_frames_normalized,
-            selected_indices_list,
-            avg_crack_width_px=avg_crack_width_px,
-            diffuse_params=self.diffuse._resolve_diffuse_params(diffuse_params),
-            max_center_px=max_center_px,
-            max_angle_deg=max_angle_deg,
-            max_cost=max_cost,
-            return_intermediates=return_intermediates,
-        )
-        ct_frame_masks = crack_tracking_result["frame_masks"]
-        _ref_shape = proc_frames_list[0].shape[:2] if proc_frames_list else (1, 1)
-        diffuse_masks: Dict[str, np.ndarray] = {
-            f"frame_{i:04d}": ct_frame_masks.get(i, np.zeros(_ref_shape, dtype=bool))
-            for i in selected_indices_list
-        }
-
-        # For region-override specimens (upper/lower/middle splits), diffuse_crack_tracking
-        # ran on the full-frame preprocessed stack and may have produced detections in the
-        # upper and lower rows that belong exclusively to edge detection. Zero those rows out
-        # before latching so the bad pixels never accumulate.
+        # In tracked region-override runs, diffuse detection uses the full preprocessed
+        # stack and may produce detections in rows reserved for edge detection. Zero
+        # those rows before latching so they never accumulate.
         if self._uses_stack_overrides():
             _ov_stacks = self._select_stacks()
             _upper_s = _ov_stacks.get("upper")
@@ -783,6 +807,7 @@ class DelaminationDetector:
             "paths": paths,
             "params": {
                 "edge_exclusion_px": exclusion_radius,
+                "track_cracks": bool(track_cracks),
             },
         }
         if return_masks:
@@ -799,7 +824,7 @@ class DelaminationDetector:
                 "edge": edge_debug,
             }
         result["crack_tracking"] = crack_tracking_result
-        if return_intermediates:
+        if return_intermediates and track_cracks:
             result["_debug_internals"] = {
                 "proc_frames": proc_frames_list,
                 "selected_indices": selected_indices_list,
@@ -1379,7 +1404,7 @@ class DiffuseDetector:
     The class exposes:
 
     - :meth:`diffuse_delamination` for crack-guided diffuse detection.
-    - :meth:`diffuse_crack_tracking` for track-based diffuse detection used by
+    - :meth:`diffuse_crack_tracking` for optional track-based diffuse detection in
       :meth:`DelaminationDetector.detect_both_delaminations`.
     """
 

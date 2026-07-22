@@ -125,14 +125,4 @@ Choosing a mode in practice
   troubleshooting order in :doc:`delamination`'s "Diffuse troubleshooting"
   section — ``reference_skip`` is the first knob to try there too.
 
-Related pages
--------------
-- :doc:`delamination` for the per-slice filter chain (grey-opening,
-  unsharp mask, directional Gaussian) that runs *after* this
-  normalization step, and for the diffuse-detection ROI thresholding that
-  consumes ``crack_frame_policy``.
-- :doc:`methodology` for how this fits into the overall detection
-  pipeline.
-- :doc:`image_handling` for how raw frames get loaded into a
-  :class:`~deladect.specimen.Specimen` in the first place, before any of
-  this runs.
+

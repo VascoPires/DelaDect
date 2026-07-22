@@ -1,6 +1,10 @@
 Delamination API
 ================
 
+For conceptual explanations and animations, see :doc:`edge_delamination` and
+:doc:`diffuse_delamination`. This page collects the shared API, combined
+classification, and parameter reference.
+
 Overview
 --------
 Delamination detection is provided by the class-based

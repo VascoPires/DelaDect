@@ -12,10 +12,14 @@ RESULTS_ROOT = REPO_ROOT / "results"
 
 
 def main() -> None:
+    data_root = REPO_ROOT / "example_images" / "sample-1"
     specimen = Specimen.from_cross_ply(
         name="01-getting-started",
         scale_px_mm=41.03328366,
-        path_full=str(REPO_ROOT / "example_images" / "sample-1"),
+        path_full=str(data_root / "full"),
+        path_upper_border=str(data_root / "upper"),
+        path_middle=str(data_root / "middle"),
+        path_lower_border=str(data_root / "lower"),
         sorting_key="_sc",
         image_types=["png"],
         results_root=str(RESULTS_ROOT),
@@ -48,7 +52,6 @@ def main() -> None:
         save_masks=True,
         save_metrics=True,
         edge_exclusion_px=5,
-        diffuse_params={"window_diffuse": (60, 60)},
         progress=True,
     )
 
