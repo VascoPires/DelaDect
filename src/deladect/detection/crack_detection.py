@@ -3,9 +3,7 @@
 Entry points:
 
 * :func:`crack_eval` - run CrackDect for one ply orientation.
-* :func:`crack_eval_by_orientation` - run CrackDect for a set of orientations on a specimen.
-* :func:`crack_eval_crossply` - convenience for 0/90 cross-ply laminates.
-* :func:`crack_eval_plus_minus` - convenience for +/- theta laminates.
+* :func:`crack_analysis` - run CrackDect for every unique orientation in a specimen layup.
 * :func:`plot_cracks` - small Matplotlib helper to visualise detected segments.
 
 Coordinate convention
@@ -179,7 +177,7 @@ def crack_eval(
     }
 
 
-def crack_eval_by_orientation(
+def crack_analysis(
     specimen: Specimen,
     *,
     orientations: Optional[Sequence[float]] = None,
@@ -195,7 +193,7 @@ def crack_eval_by_orientation(
     color_cracks: str = "red",
     frame_labels: Optional[List[str]] = None,
 ) -> Dict[str, Dict[str, Any]]:
-    """Run crack detection once per unique ply orientation.
+    """Run crack detection once per unique orientation in the specimen layup.
 
     Plies are grouped by orientation (within ``tolerance``). One representative ply
     from each orientation group is used for detection and returned together with
@@ -286,6 +284,50 @@ def crack_eval_by_orientation(
     return results
 
 
+def _warn_deprecated_crack_api(name: str) -> None:
+    warnings.warn(
+        f"{name}() is deprecated; use crack_analysis(specimen, ...) instead. "
+        "It may be removed in DelaDect 2.0.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+def crack_eval_by_orientation(
+    specimen: Specimen,
+    *,
+    orientations: Optional[Sequence[float]] = None,
+    tolerance: float = 1e-3,
+    crack_width_px: Optional[float] = None,
+    min_crack_size_px: Optional[float] = None,
+    export_images: bool = False,
+    background: bool = False,
+    comparison: bool = False,
+    save_cracks: bool = False,
+    results_dir: Optional[str] = None,
+    use_full_stack: Optional[bool] = None,
+    color_cracks: str = "red",
+    frame_labels: Optional[List[str]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Deprecated compatibility wrapper for :func:`crack_analysis`."""
+    _warn_deprecated_crack_api("crack_eval_by_orientation")
+    return crack_analysis(
+        specimen,
+        orientations=orientations,
+        tolerance=tolerance,
+        crack_width_px=crack_width_px,
+        min_crack_size_px=min_crack_size_px,
+        export_images=export_images,
+        background=background,
+        comparison=comparison,
+        save_cracks=save_cracks,
+        results_dir=results_dir,
+        use_full_stack=use_full_stack,
+        color_cracks=color_cracks,
+        frame_labels=frame_labels,
+    )
+
+
 def crack_eval_crossply(
     specimen: Specimen,
     *,
@@ -302,9 +344,10 @@ def crack_eval_crossply(
 ) -> Dict[str, Dict[str, Any]]:
     """Evaluate a cross-ply laminate at 0 and 90 degrees.
 
-    This is a convenience wrapper around :func:`crack_eval_by_orientation`.
+    Deprecated compatibility wrapper for :func:`crack_analysis`.
     """
-    return crack_eval_by_orientation(
+    _warn_deprecated_crack_api("crack_eval_crossply")
+    return crack_analysis(
         specimen,
         orientations=[0.0, 90.0],
         tolerance=tolerance,
@@ -337,7 +380,7 @@ def crack_eval_plus_minus(
     tolerance: float = 1e-3,
     frame_labels: Optional[List[str]] = None,
 ) -> Dict[str, Dict[str, Any]]:
-    """Evaluate a plus/minus laminate and optionally a transverse layer.
+    """Deprecated plus/minus compatibility wrapper for :func:`crack_analysis`.
 
     Parameters
     ----------
@@ -349,7 +392,8 @@ def crack_eval_plus_minus(
     orientations: List[float] = [float(theta), float(-theta)]
     if transverse_layer:
         orientations.append(90.0)
-    return crack_eval_by_orientation(
+    _warn_deprecated_crack_api("crack_eval_plus_minus")
+    return crack_analysis(
         specimen,
         orientations=orientations,
         tolerance=tolerance,
@@ -785,6 +829,7 @@ def _theta_from_ply(ply: Ply) -> int:
 
 __all__ = [
     "crack_eval",
+    "crack_analysis",
     "crack_eval_by_orientation",
     "crack_eval_crossply",
     "crack_eval_plus_minus",

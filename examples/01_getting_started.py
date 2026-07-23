@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from deladect.detection import DelaminationDetector, crack_eval_crossply
+from deladect.detection import DelaminationDetector, crack_analysis
 from deladect.io import save_specimen
 from deladect.specimen import Specimen
 
@@ -13,7 +13,7 @@ RESULTS_ROOT = REPO_ROOT / "results"
 
 def main() -> None:
     data_root = REPO_ROOT / "example_images" / "sample-1"
-    specimen = Specimen.from_cross_ply(
+    specimen = Specimen(
         name="01-getting-started",
         scale_px_mm=41.03328366,
         path_full=str(data_root / "full"),
@@ -25,9 +25,11 @@ def main() -> None:
         results_root=str(RESULTS_ROOT),
         avg_crack_width_px=8.0,
     )
-    interface = specimen.interfaces[0]
+    specimen.add_ply(name="ply_0", orientation_deg=0.0)
+    specimen.add_ply(name="ply_90", orientation_deg=90.0)
+    interface = specimen.add_interface(name="i0", upper_ply_index=0, lower_ply_index=1)
 
-    crack_results = crack_eval_crossply(
+    crack_results = crack_analysis(
         specimen,
         export_images=True,
         background=True,

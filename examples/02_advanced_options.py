@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from deladect.detection import DelaminationDetector, crack_eval_crossply
+from deladect.detection import DelaminationDetector, crack_analysis
 from deladect.io import save_specimen
 from deladect.specimen import Specimen
 
@@ -28,7 +28,7 @@ def main() -> None:
     )
 
     # Auto-selection uses the middle region for cracks.
-    crack_results = crack_eval_crossply(
+    crack_results = crack_analysis(
         specimen,
         export_images=True,
         background=True,

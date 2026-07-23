@@ -1,26 +1,28 @@
 01 - Getting Started
 ====================
 
-This first example aims to demonstrate a complete DelaDect workflow, including
+This first example aims to show a complete DelaDect workflow, including
 crack detection, diffuse delamination detection, and edge delamination detection. 
 
 A `Binder <https://mybinder.org/v2/gh/vascodcpires/deladect/main?labpath=notebooks/getting_started.ipynb>`_,
 notebook which serves as a companion to this example is available in the repository and can be run 
-without instalation.
+without installation.
 
 
-Workflow
---------
+The first step of any analysis in DelaDect is to create a specimen object. The specimen 
+object serves as a container for all the relevant information about the analysis.
 
-The specimen is created with :meth:`deladect.specimen.Specimen.from_cross_ply`,
-which adds 0-degree and 90-degree plies and their shared interface. The example
-supplies the full frames together with explicit upper, middle, and lower
-regions:
+
+The specimen is built by constructing a plain :class:`~deladect.specimen.Specimen`,
+then calling :meth:`~deladect.specimen.Specimen.add_ply` for the 0-degree and
+90-degree plies and :meth:`~deladect.specimen.Specimen.add_interface` for
+their shared interface. The example supplies the full frames together with
+explicit upper, middle, and lower regions:
 
 .. code-block:: python
 
    data_root = Path("example_images/sample-1")
-   specimen = Specimen.from_cross_ply(
+   specimen = Specimen(
        name="01-getting-started",
        scale_px_mm=41.03328366,
        path_full=str(data_root / "full"),
@@ -30,6 +32,9 @@ regions:
        image_types=["png"],
        results_root="results",
    )
+   specimen.add_ply(name="ply_0", orientation_deg=0.0)
+   specimen.add_ply(name="ply_90", orientation_deg=90.0)
+   interface = specimen.add_interface(name="i0", upper_ply_index=0, lower_ply_index=1)
 
 Crack detection uses the middle region, edge detection uses the upper and lower
 regions, and saved masks are reassembled to the full ``718 x 2673`` shape. The
@@ -37,7 +42,7 @@ example then runs:
 
 .. code-block:: python
 
-   crack_results = crack_eval_crossply(
+   crack_results = crack_analysis(
        specimen,
        export_images=True,
        background=True,
@@ -48,7 +53,7 @@ example then runs:
        crack_results["90"]["cracks"],
    )
 
-   detector = DelaminationDetector(specimen, specimen.interfaces[0])
+   detector = DelaminationDetector(specimen, interface)
    result = detector.detect_both_delaminations(
        cracks=cracks,
        avg_crack_width_px=8.0,

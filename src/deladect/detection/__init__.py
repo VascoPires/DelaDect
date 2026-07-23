@@ -1,6 +1,7 @@
 """Detection workflows (cracks + delamination)."""
 
 from .crack_detection import (
+    crack_analysis,
     crack_eval,
     crack_eval_by_orientation,
     crack_eval_crossply,
@@ -11,6 +12,7 @@ from .crack_tracking import CrackDetection, CrackTrack, match_tracks, normalize_
 from .delamination import DelaminationDetector, EdgeDetector, DiffuseDetector
 
 __all__ = [
+    "crack_analysis",
     "crack_eval",
     "crack_eval_by_orientation",
     "crack_eval_crossply",

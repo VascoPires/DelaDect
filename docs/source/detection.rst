@@ -37,11 +37,22 @@ Functions
 .. autosummary::
    :toctree: generated
 
+   crack_analysis
    crack_eval
+   plot_cracks
+
+Deprecated compatibility functions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The following functions remain available during the DelaDect 1.x series but
+new code should use :func:`crack_analysis` instead.
+
+.. autosummary::
+   :toctree: generated
+
    crack_eval_by_orientation
    crack_eval_crossply
    crack_eval_plus_minus
-   plot_cracks
 
 Coordinate convention
 ---------------------
@@ -62,7 +73,7 @@ Cross-ply crack detection (sample-1)
 
     from pathlib import Path
 
-   from deladect.detection import crack_eval_crossply
+   from deladect.detection import crack_analysis
    from deladect.specimen import Specimen
    from skimage.io import imread
 
@@ -83,7 +94,7 @@ Cross-ply crack detection (sample-1)
     specimen.path_full_list = [str(path) for path in frame_paths]
     specimen.image_stack_full = [imread(str(path)) for path in frame_paths]
 
-    crack_results = crack_eval_crossply(specimen, export_images=True, save_cracks=True)
+    crack_results = crack_analysis(specimen, export_images=True, save_cracks=True)
 
     print(crack_results.keys())  # typically dict_keys(['0', '90'])
     print(crack_results["0"]["metrics"].head())
