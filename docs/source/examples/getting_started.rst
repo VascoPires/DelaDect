@@ -11,11 +11,16 @@ without installation.
 
 The first step of any analysis in DelaDect is to create a specimen object. The specimen 
 object serves as a container for all the relevant information about the analysis.
-The specimen is built by constructing a plain
-:class:`~deladect.specimen.Specimen`, calling
-:meth:`~deladect.specimen.Specimen.add_ply` for the 0-degree and 90-degree
-plies, and calling :meth:`~deladect.specimen.Specimen.add_interface` for their
-shared interface. The example supplies the full frames together with explicit
+The specimen is built by constructing a 
+:class:`~deladect.specimen.Specimen` object and calling
+:meth:`~deladect.specimen.Specimen.add_ply` to add plies and calling 
+:meth:`~deladect.specimen.Specimen.add_interface` for the interfaces. 
+Here plies are associated with the crack detection and in which orientation
+the cracks are aligned and interfaces are associated with the delamination detection.
+For a diffuse-edge delamination detection, defining an interface is not mandatory, however
+it is mandatory for multi-interface delamination detection (see :doc:`delamination_multi_interface`).
+
+The example supplies the full frames together with explicit
 upper, middle, and lower regions:
 
 .. code-block:: python
