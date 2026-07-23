@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import logging
+import re
 import sys
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import warnings
@@ -43,6 +44,43 @@ else:
 Color = Tuple[float, float, float, float]
 
 logger = logging.getLogger(__name__)
+
+# Superset of characters illegal in file/directory names across Windows
+# (<>:"/\|?* and control characters), macOS (: and /), and Linux (/).
+_ILLEGAL_PATH_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_WINDOWS_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+
+def sanitize_path_token(value: Any, *, fallback: str = "unnamed") -> str:
+    """Sanitize a display label into one file/directory-name-safe token.
+
+    Ply, interface, and specimen names are free-form display labels (e.g.
+    ``"0/90"`` for an interface) and are also used to derive on-disk file and
+    directory names (e.g. cache keys like ``"both_auto_0/90"``). This
+    replaces characters illegal on Windows, macOS, or Linux with ``"_"``,
+    strips leading/trailing dots and spaces (illegal as Windows filename
+    edges), and avoids Windows-reserved device names (``CON``, ``COM1``,
+    ...). A warning is logged whenever the result differs from the input,
+    since that changes what actually appears on disk.
+    """
+    original = str(value)
+    token = _ILLEGAL_PATH_CHARS.sub("_", original).strip(" .")
+    if token.upper() in _WINDOWS_RESERVED_NAMES:
+        token = f"{token}_"
+    if not token:
+        token = fallback
+    if token != original:
+        logger.warning(
+            "%r is not a safe file/directory name on Windows, macOS, or Linux; "
+            "using %r instead.",
+            original,
+            token,
+        )
+    return token
 
 
 def rgba_from_hex(hex_color: str, alpha: float = 1.0) -> Color:
@@ -290,7 +328,12 @@ class Specimen:
 
         Result-directory components are identifiers, not arbitrary paths.  In
         particular, accepting ``..`` or an absolute path would allow callers
-        to write outside the specimen's configured result root.
+        to write outside the specimen's configured result root. Callers that
+        build a component from a free-form display label (e.g. an interface
+        named ``"0/90"``) should sanitize it first with
+        :func:`sanitize_path_token`; this validator intentionally stays
+        strict so misuse of the public ``results_dir``/specimen-name API is
+        surfaced rather than silently rewritten.
         """
         component = str(value).strip()
         path = Path(component)
@@ -1121,4 +1164,5 @@ __all__ = [
     "DEFAULT_CRACK_COLOR",
     "DEFAULT_PRIMARY_DELAMINATION_COLOR",
     "DEFAULT_SECONDARY_DELAMINATION_COLOR",
+    "sanitize_path_token",
 ]

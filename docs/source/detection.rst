@@ -110,20 +110,19 @@ Combined delamination
     interface = specimen.interfaces[0]
     detector = DelaminationDetector(specimen, interface)
 
-    # diffuse ROIs usually work best with both cross-ply crack families
-    cracks_all = Specimen.join_cracks(
-        crack_results["0"]["cracks"],
-        crack_results["90"]["cracks"],
-    )
-
     combined = detector.detect_both_delaminations(
-        cracks=cracks_all,
+        cracks=crack_results,
+        avg_crack_width_px=specimen.avg_crack_width_px,
         save_masks=True,
         save_metrics=True,
         edge_exclusion_px=5,
     )
 
    print(combined["paths"]["metrics"])
+
+Passing the complete result merges every analyzed orientation frame by frame.
+Restrict the diffuse crack families with
+``crack_analysis(specimen, orientations=[...])`` when needed.
 
 Troubleshooting quick notes
 ---------------------------

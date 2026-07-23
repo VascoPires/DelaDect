@@ -11,15 +11,20 @@ without installation.
 
 The first step of any analysis in DelaDect is to create a specimen object. The specimen 
 object serves as a container for all the relevant information about the analysis.
-
-
-The specimen is built by constructing a plain :class:`~deladect.specimen.Specimen`,
-then calling :meth:`~deladect.specimen.Specimen.add_ply` for the 0-degree and
-90-degree plies and :meth:`~deladect.specimen.Specimen.add_interface` for
-their shared interface. The example supplies the full frames together with
-explicit upper, middle, and lower regions:
+The specimen is built by constructing a plain
+:class:`~deladect.specimen.Specimen`, calling
+:meth:`~deladect.specimen.Specimen.add_ply` for the 0-degree and 90-degree
+plies, and calling :meth:`~deladect.specimen.Specimen.add_interface` for their
+shared interface. The example supplies the full frames together with explicit
+upper, middle, and lower regions:
 
 .. code-block:: python
+
+   from pathlib import Path
+
+   from deladect.detection import DelaminationDetector, crack_analysis
+   from deladect.io import save_specimen
+   from deladect.specimen import Specimen
 
    data_root = Path("example_images/sample-1")
    specimen = Specimen(
@@ -29,8 +34,10 @@ explicit upper, middle, and lower regions:
        path_upper_border=str(data_root / "upper"),
        path_middle=str(data_root / "middle"),
        path_lower_border=str(data_root / "lower"),
+       sorting_key="_sc",
        image_types=["png"],
        results_root="results",
+       avg_crack_width_px=8.0,
    )
    specimen.add_ply(name="ply_0", orientation_deg=0.0)
    specimen.add_ply(name="ply_90", orientation_deg=90.0)
@@ -48,20 +55,35 @@ example then runs:
        background=True,
        save_cracks=True,
    )
-   cracks = Specimen.join_cracks(
-       crack_results["0"]["cracks"],
-       crack_results["90"]["cracks"],
+   detector = DelaminationDetector(
+       specimen,
+       interface,
+       save_preprocess_outputs=True,
    )
-
-   detector = DelaminationDetector(specimen, interface)
    result = detector.detect_both_delaminations(
-       cracks=cracks,
+       cracks=crack_results,
        avg_crack_width_px=8.0,
        save_overlays=True,
        overlay_view="classified",
+       save_component_overlays=True,
        save_masks=True,
        save_metrics=True,
+       edge_exclusion_px=5,
+       progress=True,
    )
+
+   manifest = specimen.results_dir("config") / "specimen.json"
+   save_specimen(specimen, manifest)
+
+The complete orientation-keyed result from :func:`crack_analysis` can be passed
+directly to combined or standalone diffuse detection. DelaDect validates that
+the orientation outputs have equal frame counts and merges every orientation
+present in the result. To use only selected crack families, filter them during
+analysis:
+
+.. code-block:: python
+
+   crack_results = crack_analysis(specimen, orientations=[90.0])
 
 Static-reference preprocessing is selected automatically for this combined,
 single-interface workflow. Rolling-median preprocessing is reserved for the
@@ -100,13 +122,14 @@ Results to inspect
 Full-image comparison: connected edge regions
 ---------------------------------------------
 
-For comparison, frame 0003 illustrates a classification limitation that occurs
-when edge detection is run on the full image rather than constrained to the
-explicit upper and lower regions. Delamination
-growing inward from the upper and lower specimen boundaries has connected into
-one edge-mask component. That component touches both boundaries and also
-occupies part of the specimen middle, where diffuse delamination may physically
-be present.
+This section describes a separate, intentionally unconstrained full-image
+experiment; it is not output from the split-region Getting Started run above.
+In that comparison, frame 0003 illustrates a classification limitation that
+occurs when edge detection is run on the full image rather than constrained to
+the explicit upper and lower regions. Delamination growing inward from the
+upper and lower specimen boundaries has connected into one edge-mask component.
+That component touches both boundaries and also occupies part of the specimen
+middle, where diffuse delamination may physically be present.
 
 The combined workflow resolves overlap with edge precedence:
 
@@ -116,10 +139,14 @@ The combined workflow resolves overlap with edge precedence:
    M_{\mathrm{diffuse,raw}} \cap \neg M_{\mathrm{edge,exclusion}}
 
 Consequently, a diffuse candidate is classified exclusively as edge wherever
-the masks overlap. In this frame, 26,032 of 26,058 diffuse-candidate pixels
-(99.90 percent) overlap the edge-exclusion mask. Only 26 diffuse pixels survive
-in the complete frame. The square-cell diagram below shows the mask relationship
-over the full specimen height in a representative 600-pixel-wide region.
+the masks overlap. In the unconstrained comparison, 26,032 of 26,058
+diffuse-candidate pixels (99.90 percent) overlap the edge-exclusion mask. Only
+26 diffuse pixels survive in the complete frame. By contrast, the verified
+split-region Getting Started run produces 662,041 diffuse candidates, 5,327
+overlapping pixels (0.80 percent), and 656,714 surviving diffuse pixels for
+frame 0003. The square-cell diagram below shows the unconstrained mask
+relationship over the full specimen height in a representative 600-pixel-wide
+region.
 
 .. figure:: ../_static/examples/connected_edge_square_masks.svg
    :alt: Connected edge delamination limitation in Sample-1 frame 0003

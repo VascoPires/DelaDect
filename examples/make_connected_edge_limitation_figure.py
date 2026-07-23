@@ -10,7 +10,7 @@ from scipy import ndimage as ndi
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RESULTS = ROOT / "results" / "01-getting-started"
+RESULTS = ROOT / "results" / "01-getting-started_example_bad"
 MASKS = RESULTS / "delamination" / "both" / "masks"
 OUTPUT = RESULTS / "limitations" / "connected_edge_square_masks.svg"
 DOCS_OUTPUT = ROOT / "docs" / "source" / "_static" / "examples" / "connected_edge_square_masks.svg"

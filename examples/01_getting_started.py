@@ -35,18 +35,13 @@ def main() -> None:
         background=True,
         save_cracks=True,
     )
-    cracks = Specimen.join_cracks(
-        crack_results["0"]["cracks"],
-        crack_results["90"]["cracks"],
-    )
-
     detector = DelaminationDetector(
         specimen,
         interface,
         save_preprocess_outputs=True,
     )
     result = detector.detect_both_delaminations(
-        cracks=cracks,
+        cracks=crack_results,
         avg_crack_width_px=8.0,
         save_overlays=True,
         overlay_view="classified",

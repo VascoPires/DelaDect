@@ -18,9 +18,8 @@ from collections import deque
 import json
 import logging
 from pathlib import Path
-import re
 import warnings
-from typing import Any, Deque, Dict, Iterable, List, Optional, Sequence, Tuple, cast
+from typing import Any, Deque, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union, cast
 
 import numpy as np
 import pandas as pd
@@ -34,7 +33,12 @@ from deladect.io.delamination import (
     store_interface_delamination_results,
     store_interface_masks,
 )
-from deladect.specimen import DEFAULT_PRIMARY_DELAMINATION_COLOR, Interface, Specimen
+from deladect.specimen import (
+    DEFAULT_PRIMARY_DELAMINATION_COLOR,
+    Interface,
+    Specimen,
+    sanitize_path_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +59,13 @@ PROGRESS_MILESTONES: Tuple[int, ...] = (25, 50, 75, 90)
 PREPROCESS_MANIFEST_FILENAME = "preprocess_manifest.json"
 DIFFUSE_CRACK_FRAME_POLICIES: Tuple[str, ...] = ("current", "reference_latest", "reference_midpoint")
 CRACK_OVERLAY_RGBA: Tuple[float, float, float, float] = (0.0, 0.0, 1.0, 0.95)
+CrackAnalysisMapping = Mapping[str, Mapping[str, Any]]
+CrackInput = Union[Sequence[np.ndarray], CrackAnalysisMapping]
 
 
 def _result_key_token(value: Any) -> str:
     """Convert a display label into one safe result-directory component."""
-    token = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value)).strip("._-")
-    return token or "interface"
+    return sanitize_path_token(value, fallback="interface")
 
 
 def _progress_init(stage: str, total_frames: int, enabled: bool) -> Optional[Dict[int, bool]]:
@@ -274,14 +279,71 @@ def _reference_settings_from_cache_paths(
     }
 
 
+def _crack_input_frame_count(cracks: Any) -> int:
+    """Return the source frame count for raw or orientation-keyed crack input."""
+    if isinstance(cracks, Mapping):
+        if not cracks:
+            raise ValueError("Crack analysis results must contain at least one orientation.")
+
+        orientation_counts: Dict[str, int] = {}
+        for orientation, payload in cracks.items():
+            if not isinstance(payload, Mapping) or "cracks" not in payload:
+                raise ValueError(
+                    f"Crack analysis result '{orientation}' must be a mapping "
+                    "containing a 'cracks' field."
+                )
+            orientation_counts[str(orientation)] = _crack_input_frame_count(payload["cracks"])
+
+        unique_counts = set(orientation_counts.values())
+        if len(unique_counts) != 1:
+            details = ", ".join(
+                f"{orientation}={count}"
+                for orientation, count in orientation_counts.items()
+            )
+            raise ValueError(
+                "Crack analysis orientations must have equal frame counts; "
+                f"received {details}."
+            )
+
+        frame_count = next(iter(unique_counts))
+        if frame_count <= 0:
+            raise ValueError("Crack analysis results must contain at least one crack frame.")
+        return frame_count
+
+    if isinstance(cracks, np.ndarray):
+        if cracks.ndim == 4 and cracks.shape[-2:] == (2, 2):
+            return int(cracks.shape[0])
+        if cracks.ndim == 3 and cracks.shape[-2:] == (2, 2):
+            return 1
+        if cracks.ndim == 1 and cracks.dtype == object:
+            return int(len(cracks))
+
+    try:
+        return int(len(cracks))
+    except TypeError as exc:
+        raise TypeError(
+            "cracks must be a per-frame sequence, NumPy array, or "
+            "orientation-keyed crack_analysis result."
+        ) from exc
+
+
 def _coerce_cracks_by_frame(cracks: Any, frame_count: int) -> List[Any]:
     """Return CrackDect-style crack output as a frame-indexed Python list.
 
     CrackDect outputs may be Python sequences, object arrays (for ragged frame
     results), or dense numeric arrays with shape ``(frames, cracks, 2, 2)``.
     A ``(cracks, 2, 2)`` array is also accepted for a single-frame stack.
+    Orientation-keyed mappings returned by :func:`crack_analysis` are merged
+    frame by frame across every orientation present in the mapping.
     """
-    if isinstance(cracks, np.ndarray):
+    if isinstance(cracks, Mapping):
+        analysis_frame_count = _crack_input_frame_count(cracks)
+        orientation_frames = [
+            _coerce_cracks_by_frame(payload["cracks"], analysis_frame_count)
+            for payload in cracks.values()
+        ]
+        frame_cracks = Specimen.join_cracks(*orientation_frames)
+    elif isinstance(cracks, np.ndarray):
         if cracks.ndim == 4 and cracks.shape[-2:] == (2, 2):
             frame_cracks = [cracks[idx] for idx in range(cracks.shape[0])]
         elif cracks.ndim == 3 and cracks.shape[-2:] == (2, 2):
@@ -466,7 +528,7 @@ class DelaminationDetector:
     def detect_both_delaminations(
         self,
         *,
-        cracks: Optional[Sequence[np.ndarray]] = None,
+        cracks: Optional[CrackInput] = None,
         avg_crack_width_px: float,
         processed_cache_paths: Optional[List[Path]] = None,
         processed_stack: Optional[List[np.ndarray]] = None,
@@ -503,7 +565,9 @@ class DelaminationDetector:
         Parameters
         ----------
         cracks:
-            Per-frame cracks required for diffuse ROI construction.
+            Per-frame cracks or the orientation-keyed result returned by
+            :func:`deladect.detection.crack_analysis`. Every orientation present
+            in a structured analysis result is merged for diffuse ROI construction.
         avg_crack_width_px:
             Average crack width in pixels used by diffuse detection.
         processed_cache_paths, processed_stack:
@@ -594,7 +658,7 @@ class DelaminationDetector:
         proc_frames_list: List[np.ndarray] = []
         selected_indices_list: List[int] = []
         crack_frames_normalized: List[List[Any]] = []
-        cracks_by_frame = _coerce_cracks_by_frame(cracks, len(cracks))
+        cracks_by_frame: List[Any] = []
         crack_tracking_result: Optional[Dict[str, Any]] = None
 
         if track_cracks:
@@ -646,6 +710,7 @@ class DelaminationDetector:
                 progress=progress,
             )
             diffuse_masks = diffuse_result["masks"]
+            cracks_by_frame = _coerce_cracks_by_frame(cracks, len(diffuse_masks))
 
         # In tracked region-override runs, diffuse detection uses the full preprocessed
         # stack and may produce detections in rows reserved for edge detection. Zero
@@ -1415,7 +1480,7 @@ class DiffuseDetector:
     def diffuse_delamination(
         self,
         *,
-        cracks: Optional[Sequence[np.ndarray]] = None,
+        cracks: Optional[CrackInput] = None,
         processed_cache_paths: Optional[List[Path]] = None,
         processed_stack: Optional[List[np.ndarray]] = None,
         save_overlays: bool = False,
@@ -1434,8 +1499,9 @@ class DiffuseDetector:
         Parameters
         ----------
         cracks:
-            Per-frame crack segments. Required. The ROI builder uses these segments
-            to define local diffuse search windows.
+            Per-frame crack segments or the orientation-keyed result returned by
+            :func:`deladect.detection.crack_analysis`. Every orientation present
+            in a structured analysis result is merged into the local diffuse ROIs.
         processed_cache_paths, processed_stack:
             Exactly one preprocessed source. If omitted, preprocessing is executed
             automatically with static reference mode.
@@ -1482,7 +1548,8 @@ class DiffuseDetector:
         if save_overlays and raw_stack is None:
             raise ValueError("Cannot save overlays without a full raw image stack.")
 
-        cracks_list = list(cracks)
+        crack_input_frames = _crack_input_frame_count(cracks)
+        cracks_list = _coerce_cracks_by_frame(cracks, crack_input_frames)
         if processed_cache_paths is None and processed_stack is None:
             stack = getattr(self.owner.specimen, "image_stack_full", None) or stacks.get("full")
             if stack is None:
@@ -1650,7 +1717,7 @@ class DiffuseDetector:
     def _diffuse_delamination_region_overrides(
         self,
         *,
-        cracks: Sequence[np.ndarray],
+        cracks: CrackInput,
         processed_cache_paths: Optional[List[Path]] = None,
         save_overlays: bool = False,
         overlay_dirname: str = "delamination",
@@ -1671,7 +1738,8 @@ class DiffuseDetector:
                 "Region override mode requires upper/middle/lower stacks to be available."
             )
 
-        cracks_list = list(cracks)
+        crack_input_frames = _crack_input_frame_count(cracks)
+        cracks_list = _coerce_cracks_by_frame(cracks, crack_input_frames)
         if not cracks_list:
             raise ValueError("Diffuse delamination requires at least one crack frame.")
 
