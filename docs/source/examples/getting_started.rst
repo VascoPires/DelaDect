@@ -20,6 +20,11 @@ the cracks are aligned and interfaces are associated with the delamination detec
 For a diffuse-edge delamination detection, defining an interface is not mandatory, however
 it is mandatory for multi-interface delamination detection (see :doc:`delamination_multi_interface`).
 
+There are two ways of supplying the specimen images to DelaDect: either by providing a single full-frame 
+stack or by providing three separate stacks for the upper, middle, and lower regions of the specimen (here,
+assuming that the specimen is orinted horizontally). 
+
+The latter is recommended for the Getting Started example
 The example supplies the full frames together with explicit
 upper, middle, and lower regions:
 
