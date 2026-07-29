@@ -5,15 +5,15 @@ DelaDect is a Python package for quantitative damage analysis in
 fiber-reinforced polymers. Out of the box, the tool is able to perform the detection of cracks
 and delamination from a sequence of images. 
 
-The tool is capable of destinguishing between diffuse and edge delamination 
-and can also destinguish delamination between multiple interfaces under certain conditions (see :doc:`methodology` for details). 
+The tool is capable of distinguishing between diffuse and edge delamination
+and can also distinguish delamination between multiple interfaces under certain conditions (see :doc:`methodology` for details).
 
 .. image:: _static/sample5_sequence.gif
    :alt: DelaDect visualization
    :width: 720
    :align: center
 
-If you are new here, start with :doc:`examples/getting_started` after the instalation steps below.
+If you are new here, start with :doc:`examples/getting_started` after the installation steps below.
 
 
 Quick Start
@@ -63,9 +63,10 @@ DelaDect dependencies are installed automatically.
 Documentation overview
 ----------------------
 
-In the left sidebar, the documentation is divided into two main sections: Examples and User Guide. In the examples,
-you will find step-by-step walkthroughs of the main functionalities of DelaDect. In the User Guide, 
-you will find a detailed description of the algorithms and methods used in DelaDect.
+The documentation is divided into three sections. **Examples** contains
+step-by-step workflows. **User Guide** follows the analysis pipeline from image
+loading through detection and result storage. **API Reference** collects the
+callable classes, functions, parameters, and compatibility interfaces.
 
 There is also a binder notebooks available in this repository to run the examples without installing DelaDect. 
 You can access it at
@@ -86,16 +87,22 @@ You can access it at
    :caption: User Guide
    :hidden:
 
-   methodology
-   image_operations
-   shift_correction
    image_handling
+   shift_correction
    Image_pre_processing
-   detection
+   image_operations
+   methodology
    edge_delamination
    diffuse_delamination
-   delamination
    results_storage
+
+.. toctree::
+   :maxdepth: 1
+   :caption: API Reference
+   :hidden:
+
+   detection
+   delamination
 
 .. toctree::
    :maxdepth: 1

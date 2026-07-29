@@ -1,5 +1,10 @@
-Delamination API
-================
+Delamination Detection Methodology
+==================================
+
+This page explains how the shared delamination workflow fits together. For
+focused explanations of the two damage modes, see :doc:`edge_delamination` and
+:doc:`diffuse_delamination`. For callable signatures and the complete parameter
+reference, see :doc:`delamination`.
 
 Overview
 --------

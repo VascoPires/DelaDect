@@ -8,7 +8,6 @@ A `Binder <https://mybinder.org/v2/gh/vascodcpires/deladect/main?labpath=noteboo
 notebook which serves as a companion to this example is available in the repository and can be run 
 without installation.
 
-
 The first step of any analysis in DelaDect is to create a specimen object. The specimen 
 object serves as a container for all the relevant information about the analysis.
 The specimen is built by constructing a 
@@ -22,21 +21,33 @@ it is mandatory for multi-interface delamination detection (see :doc:`delaminati
 
 There are two ways of supplying the specimen images to DelaDect: either by providing a single full-frame 
 stack or by providing three separate stacks for the upper, middle, and lower regions of the specimen (here,
-assuming that the specimen is orinted horizontally). 
+assuming that the specimen is oriented horizontally).
 
-The latter is recommended for the Getting Started example
-The example supplies the full frames together with explicit
-upper, middle, and lower regions:
+.. figure:: ../_static/examples/split_image_vs_full_image.png
+   :alt: Full-frame image stack compared with separate upper, middle, and lower image stacks
+   :width: 100%
+   :align: center
+
+The benefit of providing separate stacks is that the edge detection 
+can be constrained to the upper and lower regions and diffuse delamination (and crack detection) 
+can be constrained to the middle region. This can be useful when edge and diffuse delamination 
+end up connected in a given specimen and edge delamination takes over (see how edge delamination is
+computed in :doc:`../delamination`).
+
+In the following snippet, a specimen object is created with three separate stacks and the plies and inerface
+are added. As a reminder, an assumption of the tool are that cracks are oriented in the same direction as the 
+plies. More details about the crack detection can be found in :doc:`../crack_detection`.
 
 .. code-block:: python
 
+   # imports
    from pathlib import Path
 
    from deladect.detection import DelaminationDetector, crack_analysis
    from deladect.io import save_specimen
    from deladect.specimen import Specimen
-
-   data_root = Path("example_images/sample-1")
+   
+   # specimen object
    specimen = Specimen(
        name="01-getting-started",
        scale_px_mm=41.03328366,
@@ -44,18 +55,17 @@ upper, middle, and lower regions:
        path_upper_border=str(data_root / "upper"),
        path_middle=str(data_root / "middle"),
        path_lower_border=str(data_root / "lower"),
-       sorting_key="_sc",
        image_types=["png"],
-       results_root="results",
        avg_crack_width_px=8.0,
    )
-   specimen.add_ply(name="ply_0", orientation_deg=0.0)
-   specimen.add_ply(name="ply_90", orientation_deg=90.0)
-   interface = specimen.add_interface(name="i0", upper_ply_index=0, lower_ply_index=1)
+   
+   # add plies to the specimen and defines orientation of the cracks
+   ply90 = specimen.add_ply(name="ply_90", orientation_deg=90.0)
+   ply0 = specimen.add_ply(name="ply_0", orientation_deg=0.0)
 
-Crack detection uses the middle region, edge detection uses the upper and lower
-regions, and saved masks are reassembled to the full ``718 x 2673`` shape. The
-example then runs:
+   interface = specimen.add_interface(name="i0", upper_ply_index=ply90, lower_ply_index=ply0)
+
+
 
 .. code-block:: python
 
@@ -72,7 +82,6 @@ example then runs:
    )
    result = detector.detect_both_delaminations(
        cracks=crack_results,
-       avg_crack_width_px=8.0,
        save_overlays=True,
        overlay_view="classified",
        save_component_overlays=True,
@@ -84,6 +93,16 @@ example then runs:
 
    manifest = specimen.results_dir("config") / "specimen.json"
    save_specimen(specimen, manifest)
+
+.. image:: ../_static/examples/getting_started_detection_outputs.png
+   :alt: Crack detection and classified edge and diffuse delamination outputs for the Getting Started example
+   :width: 100%
+   :align: center
+
+.. image:: ../_static/examples/getting_started_metric_plots.png
+   :alt: Crack density and detected delamination plotted against frame number
+   :width: 100%
+   :align: center
 
 The complete orientation-keyed result from :func:`crack_analysis` can be passed
 directly to combined or standalone diffuse detection. DelaDect validates that

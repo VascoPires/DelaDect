@@ -42,7 +42,6 @@ def main() -> None:
     )
     result = detector.detect_both_delaminations(
         cracks=crack_results,
-        avg_crack_width_px=8.0,
         save_overlays=True,
         overlay_view="classified",
         save_component_overlays=True,

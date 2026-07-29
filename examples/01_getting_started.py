@@ -25,9 +25,9 @@ def main() -> None:
         results_root=str(RESULTS_ROOT),
         avg_crack_width_px=8.0,
     )
-    specimen.add_ply(name="ply_0", orientation_deg=0.0)
-    specimen.add_ply(name="ply_90", orientation_deg=90.0)
-    interface = specimen.add_interface(name="i0", upper_ply_index=0, lower_ply_index=1)
+    ply0 = specimen.add_ply(name="ply_0", orientation_deg=0.0)
+    ply90 = specimen.add_ply(name="ply_90", orientation_deg=90.0)
+    interface = specimen.add_interface(name="i0", upper_ply_index=ply0, lower_ply_index=ply90)
 
     crack_results = crack_analysis(
         specimen,
@@ -42,7 +42,6 @@ def main() -> None:
     )
     result = detector.detect_both_delaminations(
         cracks=crack_results,
-        avg_crack_width_px=8.0,
         save_overlays=True,
         overlay_view="classified",
         save_component_overlays=True,

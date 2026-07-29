@@ -1,5 +1,5 @@
-Delamination API
-================
+Delamination API Reference
+==========================
 
 For conceptual explanations and animations, see :doc:`edge_delamination` and
 :doc:`diffuse_delamination`. This page collects the shared API, combined

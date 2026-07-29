@@ -529,7 +529,6 @@ class DelaminationDetector:
         self,
         *,
         cracks: Optional[CrackInput] = None,
-        avg_crack_width_px: float,
         processed_cache_paths: Optional[List[Path]] = None,
         processed_stack: Optional[List[np.ndarray]] = None,
         save_overlays: bool = True,
@@ -568,8 +567,6 @@ class DelaminationDetector:
             Per-frame cracks or the orientation-keyed result returned by
             :func:`deladect.detection.crack_analysis`. Every orientation present
             in a structured analysis result is merged for diffuse ROI construction.
-        avg_crack_width_px:
-            Average crack width in pixels used by diffuse detection.
         processed_cache_paths, processed_stack:
             Optional preprocessed source.  If omitted, static-reference preprocessing
             is executed automatically.  When providing pre-computed frames, they must
@@ -684,7 +681,7 @@ class DelaminationDetector:
                 proc_frames_list,
                 crack_frames_normalized,
                 selected_indices_list,
-                avg_crack_width_px=avg_crack_width_px,
+                avg_crack_width_px=self.specimen.avg_crack_width_px,
                 diffuse_params=self.diffuse._resolve_diffuse_params(diffuse_params),
                 max_center_px=max_center_px,
                 max_angle_deg=max_angle_deg,

@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 import logging
 import re
 import sys
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 import warnings
 
 import numpy as np
@@ -817,18 +817,35 @@ class Specimen:
     # Interface helpers
     # ------------------------------------------------------------------
 
+    def _resolve_ply_index(self, value: Optional[Union[int, Ply]], *, label: str) -> Optional[int]:
+        """Resolve a ply-index argument that may be an int or a `Ply` object."""
+        if value is None:
+            return None
+        if isinstance(value, Ply):
+            for idx, ply in enumerate(self.plies):
+                if ply is value:
+                    return idx
+            raise ValueError(
+                f"{label}: the given Ply {value.name!r} is not in this specimen's plies."
+            )
+        return int(value)
+
     def add_interface(
         self,
         interface: Optional[Interface] = None,
         *,
         name: Optional[str] = None,
-        upper_ply_index: Optional[int] = None,
-        lower_ply_index: Optional[int] = None,
+        upper_ply_index: Optional[Union[int, Ply]] = None,
+        lower_ply_index: Optional[Union[int, Ply]] = None,
         enabled: bool = True,
         delamination_color_rgba: Optional[Color] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Interface:
         """Append an interface, optionally constructing one from keyword arguments.
+
+        ``upper_ply_index``/``lower_ply_index`` accept either an integer index
+        into ``self.plies`` or the :class:`Ply` object itself (e.g. the value
+        returned by :meth:`add_ply`), which is resolved to its index.
 
         When ply indices are omitted, DelaDect applies firesafe inference:
 
@@ -840,14 +857,17 @@ class Specimen:
         -------
         >>> specimen.add_interface(name=\"0/90\", upper_ply_index=0, lower_ply_index=1)
         >>> specimen.add_interface(name=\"top_interface\")
+        >>> ply0 = specimen.add_ply(name=\"ply_0\", orientation_deg=0.0)
+        >>> ply90 = specimen.add_ply(name=\"ply_90\", orientation_deg=90.0)
+        >>> specimen.add_interface(name=\"0/90\", upper_ply_index=ply0, lower_ply_index=ply90)
         """
         if interface is None:
             if name is None:
                 raise ValueError("name is required for new interfaces.")
             interface = Interface(
                 name=name,
-                upper_ply_index=upper_ply_index,
-                lower_ply_index=lower_ply_index,
+                upper_ply_index=self._resolve_ply_index(upper_ply_index, label="upper_ply_index"),
+                lower_ply_index=self._resolve_ply_index(lower_ply_index, label="lower_ply_index"),
                 enabled=enabled,
                 delamination_color_rgba=delamination_color_rgba or DEFAULT_PRIMARY_DELAMINATION_COLOR,
                 metadata=metadata or {},

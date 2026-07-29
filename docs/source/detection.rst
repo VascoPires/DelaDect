@@ -1,5 +1,5 @@
-DelaDect Detection API
-======================
+Detection API Reference
+=======================
 
 Overview
 --------
@@ -112,7 +112,6 @@ Combined delamination
 
     combined = detector.detect_both_delaminations(
         cracks=crack_results,
-        avg_crack_width_px=specimen.avg_crack_width_px,
         save_masks=True,
         save_metrics=True,
         edge_exclusion_px=5,
