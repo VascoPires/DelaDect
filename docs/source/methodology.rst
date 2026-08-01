@@ -203,7 +203,8 @@ Edge primary parameters (``detect_primary(params=...)``)
 - ``scale_min=150.0``
 - ``scale_max=255.0``
 - ``seed_ratio=0.01``
-- ``connectivity_mode="directional"`` (optional ``"legacy_flood"`` compatibility mode)
+- ``connectivity_mode="directional"`` (also supports strict ``"columnwise"``;
+  the former ``"legacy_flood"`` mode was removed)
 - ``directional_lateral_drift_px=None``
 - ``directional_lateral_drift_scale=0.25``
 - ``hard_floor=0.90`` (normalized gate on smoothed image; tweak per specimen)

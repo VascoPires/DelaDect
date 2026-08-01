@@ -25,14 +25,13 @@ Free-edge reconstruction
 ------------------------
 
 Thresholding alone can produce isolated dark regions away from the edge.
-Directional reconstruction rejects those regions. Starting from the shallow
-seed strip at row zero, a candidate pixel is accepted only when the preceding
-row contains an accepted pixel within the configured horizontal drift range.
-
-The drift value is a tolerance, not a required number of supporting pixels.
-For example, a drift of three means that one accepted pixel anywhere within
-``±3`` columns in the preceding row is sufficient. Empty rows cannot be
-jumped.
+Both reconstruction modes reject isolated regions. ``"directional"`` accepts
+a candidate when the preceding row contains an accepted pixel within the
+configured horizontal drift range. The drift is a tolerance: a value of three
+permits support from any accepted pixel within ``+-3`` columns.
+``"columnwise"`` is stricter: only the pixel directly above in the same column
+can provide support. Empty rows cannot be jumped in either mode. The removed
+``legacy_flood`` mode is no longer available.
 
 Frame-to-frame latching
 -----------------------
@@ -46,6 +45,7 @@ Key parameters
 --------------
 
 - ``seed_ratio`` controls the depth of the initial free-edge seed.
+- ``connectivity_mode`` supports ``"directional"`` and ``"columnwise"``.
 - ``directional_lateral_drift_px`` explicitly sets horizontal drift per row.
 - ``directional_lateral_drift_scale`` derives drift from average crack width
   when no explicit pixel value is supplied.
@@ -53,4 +53,3 @@ Key parameters
 - ``hard_floor`` provides an additional normalized intensity gate.
 
 See :doc:`delamination` for the full API and parameter listing.
-

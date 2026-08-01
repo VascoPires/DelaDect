@@ -36,7 +36,7 @@ computed in :doc:`../delamination`).
 
 In the following snippet, a specimen object is created with three separate stacks and the plies and inerface
 are added. As a reminder, an assumption of the tool are that cracks are oriented in the same direction as the 
-plies. More details about the crack detection can be found in :doc:`../crack_detection`.
+plies. More details about the crack detection can be found in :doc:`../detection`.
 
 .. code-block:: python
 
@@ -56,16 +56,17 @@ plies. More details about the crack detection can be found in :doc:`../crack_det
        path_middle=str(data_root / "middle"),
        path_lower_border=str(data_root / "lower"),
        image_types=["png"],
-       avg_crack_width_px=8.0,
+       avg_crack_width_px=14.0,
    )
    
    # add plies to the specimen and defines orientation of the cracks
-   ply90 = specimen.add_ply(name="ply_90", orientation_deg=90.0)
-   ply0 = specimen.add_ply(name="ply_0", orientation_deg=0.0)
+   ply90 = specimen.add_ply(name="ply_90", orientation_deg=90.0, avg_crack_width_px=14.0, min_crack_length_px=90.0)
+   ply0 = specimen.add_ply(name="ply_0", orientation_deg=0.0, avg_crack_width_px=14.0, min_crack_length_px=90.0)
 
    interface = specimen.add_interface(name="i0", upper_ply_index=ply90, lower_ply_index=ply0)
 
-
+After the specimen is created, the crack detection can be run with :func:`crack_analysis`. This step is only required
+if diffuse delamination is required for the analysis.
 
 .. code-block:: python
 
@@ -75,29 +76,67 @@ plies. More details about the crack detection can be found in :doc:`../crack_det
        background=True,
        save_cracks=True,
    )
+
+For the crack analysis, the main parameters used are ``avg_crack_width_px`` and ``min_crack_length_px``,
+and those are defined in the ply object and are inherited from
+`CrackDect <https://crackdect.readthedocs.io/en/latest/index.html>`_ [Drvoderic2022]_.
+
+The output of the function is a structured dictionary with the crack detection results for each orientation. 
+The output can be used directly for diffuse delamination, as shown in the following code snippet.
+
+.. code-block:: python
+
    detector = DelaminationDetector(
        specimen,
        interface,
        save_preprocess_outputs=True,
    )
+
+  # diffuse delamination parameters 
+  diffuse_params={
+      "window_diffuse": (30, 30),
+      "diffuse_dx": 20.0,
+      "diffuse_dy": 20.0,
+  }
+
+  
+  # edge delamination parameters
+  edge_params={
+      "window_edge": (1, 60),
+      "seed_ratio": 0.01,
+  }
+
+
+   # performs both edge and diffuse delamination
    result = detector.detect_both_delaminations(
        cracks=crack_results,
        save_overlays=True,
-       overlay_view="classified",
-       save_component_overlays=True,
-       save_masks=True,
        save_metrics=True,
-       edge_exclusion_px=5,
-       progress=True,
+       diffuse_params=diffuse_params,
+       edge_params=edge_params
    )
 
-   manifest = specimen.results_dir("config") / "specimen.json"
-   save_specimen(specimen, manifest)
+The suggested parameters for the delamination detection for this example are the ones presented in the code snippet above:
+
+- ``window_edge`` and ``window_diffuse`` are the sizes of the sliding windows used for the edge and diffuse
+  detection, respectively. For a window of size ``(wy, wx)``, the image is passed through a maximum filter
+  followed by a minimum filter, both using that window as a rectangular neighbourhood. In practical terms, the
+  window size controls how cracks and noise are filtered out from the delamination detection.
+- ``diffuse_dx`` and ``diffuse_dy`` are the dimensions of the region of interest (ROI) around each crack used to
+  compute the diffuse delamination.
+- ``seed_ratio`` is the fraction of rows, starting from the specimen edge, trusted as the initial seed region for
+  edge-connected reconstruction. A ratio of 0.01 seeds from the first 1% of rows in each split half.
+
+More information about these and other parameters can be found in :doc:`../delamination`.
+The outputs of the delamination detection are shown below.
 
 .. image:: ../_static/examples/getting_started_detection_outputs.png
    :alt: Crack detection and classified edge and diffuse delamination outputs for the Getting Started example
    :width: 100%
-   :align: center
+   :align: center  
+
+
+
 
 .. image:: ../_static/examples/getting_started_metric_plots.png
    :alt: Crack density and detected delamination plotted against frame number
@@ -196,3 +235,11 @@ that specific failure mode by preventing the edge detector from evaluating the
 middle rows.
 
 Continue with :doc:`advanced_options` to control the image regions explicitly.
+
+References
+----------
+
+.. [Drvoderic2022] Drvoderic, M., Bender, J. J., Pletz, M., & Schuecker, C. (2022).
+   Version 0.2 - CrackDect: Detecting crack densities in images of fiber-reinforced
+   polymers. *SoftwareX*, 19, 101198.
+   `<https://doi.org/10.1016/j.softx.2022.101198>`_

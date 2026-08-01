@@ -5,8 +5,10 @@ import pytest
 
 from deladect.detection import DiffuseDetector
 from deladect.detection.delamination import (
+    DelaminationDetector,
     _coerce_cracks_by_frame,
     _crack_input_frame_count,
+    _require_equal_frame_counts,
     _result_key_token,
 )
 
@@ -100,6 +102,48 @@ def test_reject_crack_analysis_result_with_mismatched_frame_counts():
 def test_reject_malformed_crack_analysis_results(analysis, message):
     with pytest.raises(ValueError, match=message):
         _coerce_cracks_by_frame(analysis, frame_count=1)
+
+
+def test_coerce_cracks_by_frame_rejects_frame_count_mismatch():
+    cracks = [np.empty((0, 2, 2)), np.empty((0, 2, 2)), np.empty((0, 2, 2))]
+
+    with pytest.raises(ValueError, match="Crack input has 3 frame"):
+        _coerce_cracks_by_frame(cracks, frame_count=5)
+
+
+def test_require_equal_frame_counts_passes_through_when_equal():
+    assert _require_equal_frame_counts({"upper": 5, "middle": 5, "lower": 5}) == 5
+
+
+def test_require_equal_frame_counts_names_the_mismatch():
+    with pytest.raises(ValueError, match=r"upper=5, middle=4, lower=5"):
+        _require_equal_frame_counts({"upper": 5, "middle": 4, "lower": 5})
+
+
+def test_cracks_for_full_overlay_shifts_deterministically_regardless_of_value_range():
+    upper_height = 50
+
+    # A short segment sitting near y=0 (looks like a middle-region crack).
+    near_zero = [np.array([[0.5, 3.0], [4.0, 3.0]])]
+    # A long segment whose values span well past any plausible middle_height,
+    # which the old value-range heuristic would have treated as "already full frame".
+    far_ranging = [np.array([[0.5, 3.0], [900.0, 3.0]])]
+
+    for cracks in (near_zero, far_ranging):
+        shifted = DelaminationDetector._cracks_for_full_overlay(
+            cracks, shift=True, upper_height=upper_height
+        )
+        # y=0 in middle-space must always land at exactly y=upper_height, no matter
+        # how long the crack is or how its coordinates are distributed.
+        assert shifted[0][0, 0] == pytest.approx(upper_height + 0.5)
+
+
+def test_cracks_for_full_overlay_leaves_coordinates_untouched_when_shift_is_false():
+    cracks = [np.array([[10.0, 3.0], [20.0, 3.0]])]
+
+    result = DelaminationDetector._cracks_for_full_overlay(cracks, shift=False, upper_height=50)
+
+    np.testing.assert_array_equal(result[0], cracks[0])
 
 
 def test_standalone_diffuse_accepts_crack_analysis_result():

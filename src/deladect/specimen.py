@@ -281,6 +281,7 @@ class Specimen:
     image_stack_upper: Optional[Any] = field(init=False, default=None)
     image_stack_lower: Optional[Any] = field(init=False, default=None)
     image_stack_middle: Optional[Any] = field(init=False, default=None)
+    _region_frame_keys: Dict[str, List[Any]] = field(init=False, default_factory=dict)
 
     def __post_init__(self) -> None:
         """Validate the stack configuration and load optional metadata.
@@ -531,6 +532,46 @@ class Specimen:
                 as_gray=as_gray,
             )
 
+        self._validate_frame_alignment()
+
+    def _validate_frame_alignment(self) -> None:
+        """Ensure regions with an initialized image stack refer to the same frames, in the same order.
+
+        Each region is sorted independently by :func:`crackdect.sort_paths`, so
+        nothing otherwise guarantees that e.g. the ``upper`` and ``middle``
+        stacks actually contain the same physical frames if one region is
+        missing an image. This compares the frame identity keys captured in
+        :meth:`_load_region_stack` (the frame number parsed from each filename
+        when available, else the filename itself) across every initialized
+        region and raises rather than silently proceeding with misaligned or
+        differently-sized stacks.
+        """
+        region_keys = {
+            name: keys
+            for name, keys in self._region_frame_keys.items()
+            if getattr(self, f"image_stack_{name}", None) is not None
+        }
+        if len(region_keys) < 2:
+            return
+
+        reference_name, reference_keys = next(iter(region_keys.items()))
+        for name, keys in region_keys.items():
+            if name == reference_name or keys == reference_keys:
+                continue
+            reference_set, other_set = set(reference_keys), set(keys)
+            missing = sorted(reference_set - other_set, key=str)
+            extra = sorted(other_set - reference_set, key=str)
+            details = []
+            if missing:
+                details.append(f"is missing frame(s) {missing} present in '{reference_name}'")
+            if extra:
+                details.append(f"has extra frame(s) {extra} not present in '{reference_name}'")
+            if not details:
+                details.append(f"has the same frames as '{reference_name}' but in a different order")
+            raise ValueError(
+                f"Frame alignment mismatch: region '{name}' " + "; ".join(details) + "."
+            )
+
     def _load_region_stack(
         self,
         *,
@@ -548,12 +589,17 @@ class Specimen:
         if not paths:
             raise ValueError(f"No images found for region {name!r} in {folder!r}.")
 
-        sorted_paths, _ = sort_paths(paths, sorting_key=self.sorting_key)
+        sorted_paths, numbers = sort_paths(paths, sorting_key=self.sorting_key)
         if sorted_paths.size == 0:
             paths_list = sorted(map(str, paths))
+            # sort_paths couldn't extract a frame number from these filenames;
+            # fall back to the filename stem as the best available identity key.
+            frame_keys: List[Any] = [Path(p).stem for p in paths_list]
         else:
             paths_list = [str(p) for p in sorted_paths]
+            frame_keys = [int(n) for n in numbers]
         setattr(self, f"path_{name}_list", paths_list)
+        self._region_frame_keys[name] = frame_keys
 
         stack = self._build_stack(paths_list, dtype=dtype, as_gray=as_gray)
         setattr(self, f"image_stack_{name}", stack)

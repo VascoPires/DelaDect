@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 from scipy import ndimage as ndi
 from skimage.filters import threshold_otsu, unsharp_mask
-from skimage.morphology import closing, disk, reconstruction
+from skimage.morphology import closing, disk
 
 from deladect.io.delamination import (
     save_interface_metrics,
@@ -327,6 +327,25 @@ def _crack_input_frame_count(cracks: Any) -> int:
         ) from exc
 
 
+def _require_equal_frame_counts(counts: Dict[str, int]) -> int:
+    """Return the shared frame count across named inputs, or raise naming the mismatch.
+
+    Region-override detection reads several independently-loaded stacks (and
+    optionally crack input); silently taking ``min(...)`` across them would
+    mask a missing frame in one region as a shorter-but-successful run. This
+    makes that mismatch a hard, named error instead.
+    """
+    unique_counts = set(counts.values())
+    if len(unique_counts) > 1:
+        details = ", ".join(f"{name}={count}" for name, count in counts.items())
+        raise ValueError(
+            f"Frame count mismatch between inputs: {details}. Refusing to silently "
+            "truncate to the shortest input; verify that all regions/crack input "
+            "were produced from the same set of frames."
+        )
+    return next(iter(unique_counts))
+
+
 def _coerce_cracks_by_frame(cracks: Any, frame_count: int) -> List[Any]:
     """Return CrackDect-style crack output as a frame-indexed Python list.
 
@@ -370,10 +389,13 @@ def _coerce_cracks_by_frame(cracks: Any, frame_count: int) -> List[Any]:
         except TypeError as exc:
             raise TypeError("cracks must be a per-frame sequence or NumPy array.") from exc
 
-    if len(frame_cracks) > frame_count:
-        frame_cracks = frame_cracks[:frame_count]
-    elif len(frame_cracks) < frame_count:
-        frame_cracks.extend([[] for _ in range(frame_count - len(frame_cracks))])
+    if len(frame_cracks) != frame_count:
+        raise ValueError(
+            f"Crack input has {len(frame_cracks)} frame(s) but {frame_count} frame(s) "
+            "were expected from the image stack being processed; refusing to silently "
+            "truncate or pad with empty frames. Verify that crack detection and "
+            "delamination detection were run on the same set of frames."
+        )
     return frame_cracks
 
 
@@ -533,7 +555,7 @@ class DelaminationDetector:
         processed_stack: Optional[List[np.ndarray]] = None,
         save_overlays: bool = True,
         overlay_dirname: str = "delamination",
-        overlay_view: str = "union",
+        overlay_view: str = "classified",
         save_component_overlays: bool = False,
         edge_overlay_view: str = "both",
         edge_exclusion_px: int = 5,
@@ -553,6 +575,7 @@ class DelaminationDetector:
         debug: bool = False,
         save_edge_debug: bool = False,
         progress: bool = False,
+        crack_coordinate_space: str = "middle",
     ) -> Dict[str, Any]:
         """Detect edge and diffuse delamination, then resolve overlap.
 
@@ -606,6 +629,13 @@ class DelaminationDetector:
             If ``True``, include masks in the returned dictionary.
         debug:
             If ``True``, include edge/diffuse debug payloads.
+        crack_coordinate_space:
+            Coordinate space of ``cracks``, used for full-frame overlays in
+            region-override mode: ``"middle"`` (default) if crack detection
+            ran on the middle-region stack, or ``"full"`` if it was forced
+            onto the full-frame stack (e.g. via ``use_full_stack=True`` in
+            :func:`deladect.detection.crack_analysis`). This is never
+            inferred from the coordinate values themselves.
 
         Returns
         -------
@@ -617,6 +647,8 @@ class DelaminationDetector:
             raise ValueError("Diffuse delamination requires `cracks` to be provided.")
         if processed_cache_paths and processed_stack:
             raise ValueError("Provide either processed_cache_paths or processed_stack, not both.")
+        if crack_coordinate_space not in {"middle", "full"}:
+            raise ValueError("crack_coordinate_space must be one of: 'middle', 'full'.")
         if overlay_view not in {"union", "classified"}:
             raise ValueError("overlay_view must be one of: 'union', 'classified'.")
 
@@ -783,12 +815,10 @@ class DelaminationDetector:
                 frame_cracks = cracks_by_frame[frame_idx] if frame_idx < len(cracks_by_frame) else None
                 if self._uses_stack_overrides():
                     upper_h = int(np.asarray(_ensure_uint8(getattr(self.specimen, "image_stack_upper")[frame_idx])).shape[0])
-                    middle_h = int(np.asarray(_ensure_uint8(getattr(self.specimen, "image_stack_middle")[frame_idx])).shape[0])
                     frame_cracks = self._cracks_for_full_overlay(
                         frame_cracks,
+                        shift=(crack_coordinate_space == "middle"),
                         upper_height=upper_h,
-                        middle_height=middle_h,
-                        full_height=int(raw_frame.shape[0]),
                     )
                 _save_diffuse_overlay(raw_frame, diffuse_final, diffuse_overlay_path, cracks=frame_cracks)
 
@@ -810,13 +840,10 @@ class DelaminationDetector:
                     cracks=(
                         self._cracks_for_full_overlay(
                             cracks_by_frame[frame_idx] if frame_idx < len(cracks_by_frame) else None,
-                            upper_height=int(np.asarray(_ensure_uint8(getattr(self.specimen, "image_stack_upper")[frame_idx])).shape[0])
-                            if self._uses_stack_overrides()
-                            else 0,
-                            middle_height=int(np.asarray(_ensure_uint8(getattr(self.specimen, "image_stack_middle")[frame_idx])).shape[0])
-                            if self._uses_stack_overrides()
-                            else int(raw_frame.shape[0]),
-                            full_height=int(raw_frame.shape[0]),
+                            shift=(crack_coordinate_space == "middle"),
+                            upper_height=int(
+                                np.asarray(_ensure_uint8(getattr(self.specimen, "image_stack_upper")[frame_idx])).shape[0]
+                            ),
                         )
                         if self._uses_stack_overrides()
                         else (cracks_by_frame[frame_idx] if frame_idx < len(cracks_by_frame) else None)
@@ -927,24 +954,25 @@ class DelaminationDetector:
     def _cracks_for_full_overlay(
         cracks: Optional[Sequence[np.ndarray]],
         *,
+        shift: bool,
         upper_height: int,
-        middle_height: int,
-        full_height: int,
     ) -> Optional[List[np.ndarray]]:
-        """Shift middle-stack crack coordinates into full-frame coordinates for overlays.
+        """Reshape crack segments for a full-frame overlay.
 
-        Crack detection in region mode runs on the middle stack, so crack ``y`` values
-        are in ``[0, middle_height)``. Full-frame overlays require ``+ upper_height``.
-        If cracks already appear to be in full-frame coordinates, they are left unchanged.
+        ``shift`` must be supplied by the caller based on which stack crack
+        detection actually ran on -- it is never inferred from the coordinate
+        values themselves. A full-frame crack near the top of the image is
+        numerically indistinguishable from a middle-region crack near
+        ``y=0``, so guessing from value ranges previously produced a real
+        overlay bug where cracks appeared shifted into the wrong region.
+        When ``shift`` is ``True``, coordinates are translated by
+        ``upper_height`` so middle-region ``y=0`` always maps to full-frame
+        ``y=upper_height``, regardless of crack length or distribution.
         """
         if cracks is None:
             return None
 
-        if upper_height <= 0 or middle_height <= 0 or full_height <= middle_height:
-            return [np.asarray(segment, dtype=float).reshape(-1, 2) for segment in cracks]
-
         prepared: List[np.ndarray] = []
-        y_values: List[float] = []
         for segment in cracks:
             try:
                 arr = np.asarray(segment, dtype=float).reshape(-1, 2)
@@ -953,23 +981,10 @@ class DelaminationDetector:
             if arr.shape[0] < 2:
                 continue
             prepared.append(arr)
-            y_values.extend(arr[:, 0].tolist())
 
-        if not prepared:
-            return []
-
-        y_min = min(y_values)
-        y_max = max(y_values)
-
-        # Heuristic: middle-stack coordinates sit near [0, middle_height).
-        if y_min >= -1.0 and y_max <= float(middle_height) + 1.0:
-            shifted: List[np.ndarray] = []
-            for arr in prepared:
-                arr_shift = arr.copy()
-                arr_shift[:, 0] += float(upper_height)
-                shifted.append(arr_shift)
-            return shifted
-
+        if shift and upper_height > 0:
+            offset = np.array([float(upper_height), 0.0])
+            return [arr + offset for arr in prepared]
         return prepared
 
     def apply_minimum_history(
@@ -1486,6 +1501,7 @@ class DiffuseDetector:
         params: Optional[Dict[str, Any]] = None,
         debug: bool = False,
         progress: bool = False,
+        crack_coordinate_space: str = "middle",
     ) -> Dict[str, Any]:
         """Detect diffuse delamination masks using crack-guided ROIs.
 
@@ -1516,6 +1532,11 @@ class DiffuseDetector:
             indices are derived from that metadata.
         debug:
             If ``True``, return per-frame thresholds and ROI bounds.
+        crack_coordinate_space:
+            Coordinate space of ``cracks``, used for full-frame overlays in
+            region-override mode: ``"middle"`` (default) if crack detection
+            ran on the middle-region stack, or ``"full"`` if it was forced
+            onto the full-frame stack. Never inferred from coordinate values.
 
         Returns
         -------
@@ -1527,6 +1548,8 @@ class DiffuseDetector:
             raise ValueError("Diffuse delamination requires `cracks` to be provided.")
         if processed_cache_paths and processed_stack:
             raise ValueError("Provide either processed_cache_paths or processed_stack, not both.")
+        if crack_coordinate_space not in {"middle", "full"}:
+            raise ValueError("crack_coordinate_space must be one of: 'middle', 'full'.")
 
         if self.owner._uses_stack_overrides():
             return self._diffuse_delamination_region_overrides(
@@ -1538,6 +1561,7 @@ class DiffuseDetector:
                 params=params,
                 debug=debug,
                 progress=progress,
+                crack_coordinate_space=crack_coordinate_space,
             )
 
         stacks = self.owner._select_stacks()
@@ -1722,6 +1746,7 @@ class DiffuseDetector:
         params: Optional[Dict[str, Any]] = None,
         debug: bool = False,
         progress: bool = False,
+        crack_coordinate_space: str = "middle",
     ) -> Tuple[Dict[str, np.ndarray], Optional[Dict[str, Any]]]:
         """Diffuse detection path that prioritizes explicit upper/middle/lower stacks."""
         stacks = self.owner._select_stacks()
@@ -1747,7 +1772,14 @@ class DiffuseDetector:
             diffuse_params["reference_window"] = ref_from_cache["reference_window"]
             diffuse_params["reference_skip"] = ref_from_cache["reference_skip"]
 
-        total_frames = min(len(middle_stack), len(upper_stack), len(lower_stack), len(cracks_list))
+        total_frames = _require_equal_frame_counts(
+            {
+                "middle": len(middle_stack),
+                "upper": len(upper_stack),
+                "lower": len(lower_stack),
+                "cracks": len(cracks_list),
+            }
+        )
         if max_frames is not None:
             total_frames = min(total_frames, max(0, int(max_frames)))
 
@@ -1883,9 +1915,8 @@ class DiffuseDetector:
                     )
                 overlay_cracks = self.owner._cracks_for_full_overlay(
                     frame_cracks,
+                    shift=(crack_coordinate_space == "middle"),
                     upper_height=upper_h,
-                    middle_height=middle_h,
-                    full_height=int(raw_frame.shape[0]),
                 )
                 overlay_dir = self.owner.specimen.results_dir(overlay_dirname, "diffuse", "overlays")
                 overlay_path = overlay_dir / f"diffuse_overlay_{idx:04d}.png"
@@ -2999,7 +3030,9 @@ class EdgeDetector:
                 "Region override mode requires upper/middle/lower stacks to be available."
             )
 
-        total_frames = min(len(upper_stack), len(middle_stack), len(lower_stack))
+        total_frames = _require_equal_frame_counts(
+            {"upper": len(upper_stack), "middle": len(middle_stack), "lower": len(lower_stack)}
+        )
         if max_frames is not None:
             total_frames = min(total_frames, max(0, int(max_frames)))
         if total_frames <= 0:
@@ -3682,6 +3715,7 @@ class EdgeDetector:
                     "similarity": None,
                     "candidate_pixels": 0,
                     "snapshot_pixels": 0,
+                    "connectivity_mode": "directional",
                     "directional_lateral_drift_px": lateral_drift_px,
                 }
                 if return_masks:
@@ -3750,6 +3784,7 @@ class EdgeDetector:
                 "similarity": similarity,
                 "candidate_pixels": int(np.count_nonzero(candidate)),
                 "snapshot_pixels": int(np.count_nonzero(snapshot)),
+                "connectivity_mode": "directional",
                 "directional_lateral_drift_px": int(lateral_drift_px),
             }
             if return_masks:
@@ -3841,8 +3876,13 @@ class EdgeDetector:
             raise ValueError("seed_ratio must be > 0.")
 
         connectivity_mode = str(resolved.get("connectivity_mode", "directional")).strip().lower()
-        if connectivity_mode not in {"directional", "legacy_flood"}:
-            raise ValueError("connectivity_mode must be 'directional' or 'legacy_flood'.")
+        if connectivity_mode == "legacy_flood":
+            raise ValueError(
+                "connectivity_mode='legacy_flood' has been removed; "
+                "use connectivity_mode='directional' or 'columnwise'."
+            )
+        if connectivity_mode not in {"directional", "columnwise"}:
+            raise ValueError("connectivity_mode must be 'directional' or 'columnwise'.")
 
         resolved["window_edge"] = (int(window_edge[0]), int(window_edge[1]))
         resolved["gaussian_filters"] = (float(gaussian_filters[0]), float(gaussian_filters[1]))
@@ -3985,12 +4025,11 @@ class EdgeDetector:
 
         primary_seed = np.zeros_like(combined_upper, dtype=np.uint8)
         primary_seed[:seed_depth, :] = combined_upper[:seed_depth, :].astype(np.uint8)
-        if connectivity_mode == "legacy_flood":
-            primary_edge_snapshot = reconstruction(
-                seed=primary_seed,
-                mask=combined_upper.astype(np.uint8),
-                method="dilation",
-            ).astype(bool)
+        if connectivity_mode == "columnwise":
+            primary_edge_snapshot = _rebuild_edge_connected_columnwise(
+                combined_upper,
+                seed_depth=seed_depth,
+            )
         else:
             primary_edge_snapshot = _rebuild_edge_connected_directional(
                 combined_upper,
@@ -4127,11 +4166,11 @@ def _rebuild_edge_connected_directional(
     seed_depth: int,
     lateral_drift_px: int,
 ) -> np.ndarray:
-    """Rebuild edge-connected mask using vertical-biased propagation.
+    """Rebuild an edge-connected mask using vertical-biased propagation.
 
-    Growth is causal from top to bottom: each row can only activate pixels that
-    are present in ``mask`` and have support from the previous activated row
-    within ``lateral_drift_px`` columns.
+    Growth is causal from top to bottom: each row can activate only candidate
+    pixels supported by the preceding accepted row within ``lateral_drift_px``
+    columns. Empty rows cannot be jumped.
     """
     mask_bool = np.asarray(mask, dtype=bool)
     if mask_bool.ndim != 2:
@@ -4159,6 +4198,24 @@ def _rebuild_edge_connected_directional(
         support = ndi.binary_dilation(rebuilt[row - 1, :], structure=support_structure)
         rebuilt[row, :] = mask_bool[row, :] & support
     return rebuilt
+
+
+def _rebuild_edge_connected_columnwise(
+    mask: np.ndarray,
+    *,
+    seed_depth: int,
+) -> np.ndarray:
+    """Rebuild an edge-connected mask without lateral or diagonal support.
+
+    Seed-strip candidates are accepted directly. Each subsequent candidate is
+    accepted only if the pixel immediately above it in the same column was
+    accepted. A gap therefore terminates growth in that column.
+    """
+    return _rebuild_edge_connected_directional(
+        mask,
+        seed_depth=seed_depth,
+        lateral_drift_px=0,
+    )
 
 
 def _apply_edge_precedence(
