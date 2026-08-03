@@ -125,8 +125,9 @@ according to the following expressions:
 
    Marker numbering/order used for strain evaluation.
 
-For a pair of markers :math:`i, j`, let :math:`x` be the vertical (column)
-pixel coordinate and :math:`y` the horizontal (row) pixel coordinate. Each
+Tracked marker coordinates are stored as ``[row, col]``, equivalent to
+``[y, x]``. Thus :math:`x` is the horizontal column coordinate and :math:`y`
+is the vertical row coordinate, with the image origin at the top-left. Each
 segment length is measured in the reference frame (:math:`L^{(0)}`) and in
 the current frame (:math:`L^{(n)}`), and the engineering strain is computed
 based on the following expression:
@@ -152,6 +153,9 @@ vertical distances between markers on the left and right edges:
 
 The reported :math:`\varepsilon_x`/:math:`\varepsilon_y` for a frame is the
 average of :math:`\varepsilon_{ij}` over its valid segments. 
+
+The strain-result subscripts describe the historical longitudinal/transverse
+output channels. They do not change the image-coordinate convention above.
 
 Outputs
 -------

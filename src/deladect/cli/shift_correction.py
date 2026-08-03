@@ -294,7 +294,8 @@ class DIC:
         Returns
         -------
         points : ndarray
-            An array of coordinates of the extracted points.
+            Point coordinates stored as ``[row, col]``, equivalent to
+            ``[y, x]`` image coordinates.
         """
 
         image_0 = np.asarray(image, dtype=float)

@@ -177,10 +177,34 @@ def crack_eval(
     }
 
 
+def _resolve_requested_plies(
+    specimen: Specimen, plies: Sequence[Any]
+) -> List[Ply]:
+    """Resolve a mixed sequence of ply names and :class:`Ply` objects."""
+    resolved: List[Ply] = []
+    missing: List[str] = []
+    for entry in plies:
+        if isinstance(entry, Ply):
+            resolved.append(entry)
+            continue
+        ply = specimen.get_ply_by_name(str(entry))
+        if ply is None:
+            missing.append(str(entry))
+        else:
+            resolved.append(ply)
+    if missing:
+        raise ValueError(
+            f"Requested plies not found in specimen '{specimen.name}': "
+            f"{', '.join(missing)}"
+        )
+    return resolved
+
+
 def crack_analysis(
     specimen: Specimen,
     *,
     orientations: Optional[Sequence[float]] = None,
+    plies: Optional[Sequence[Any]] = None,
     tolerance: float = 1e-3,
     crack_width_px: Optional[float] = None,
     min_crack_size_px: Optional[float] = None,
@@ -193,41 +217,88 @@ def crack_analysis(
     color_cracks: str = "red",
     frame_labels: Optional[List[str]] = None,
 ) -> Dict[str, Dict[str, Any]]:
-    """Run crack detection once per unique orientation in the specimen layup.
+    """Run crack detection once per unique orientation, or per requested ply.
 
-    Plies are grouped by orientation (within ``tolerance``). One representative ply
-    from each orientation group is used for detection and returned together with
-    metadata and raw CrackDect outputs.
+    By default (``orientations=None``, ``plies=None``), plies are grouped by
+    orientation (within ``tolerance``) and one representative ply per group is
+    used for detection. If a group has more than one ply, the first is used
+    and a warning is logged.
 
-    Each orientation entry includes ``cracks``, ``densities``, ``thresholds``,
+    ``orientations`` restricts detection to the given orientation angles
+    (e.g. ``[0.0, 90.0]``); this still uses one representative ply per
+    matched orientation group.
+
+    ``plies`` instead selects individual plies by name (``str``) or by
+    :class:`Ply` object, bypassing orientation grouping entirely. Use this
+    when a specimen has multiple plies at the same orientation and you need
+    to analyse a specific one rather than an arbitrary representative.
+    ``orientations`` and ``plies`` are mutually exclusive.
+
+    Each result entry includes ``cracks``, ``densities``, ``thresholds``,
     ``metrics``, ``paths``, and ``params``.
     """
+    if orientations is not None and plies is not None:
+        raise ValueError("Pass only one of `orientations` or `plies`, not both.")
+
+    results: Dict[str, Dict[str, Any]] = {}
+
+    if plies is not None:
+        requested_plies = _resolve_requested_plies(specimen, plies)
+        for ply in requested_plies:
+            structured = crack_eval(
+                specimen,
+                ply=ply,
+                crack_width_px=crack_width_px,
+                min_crack_size_px=min_crack_size_px,
+                export_images=export_images,
+                background=background,
+                comparison=comparison,
+                save_cracks=save_cracks,
+                results_dir=results_dir,
+                use_full_stack=use_full_stack,
+                color_cracks=color_cracks,
+                frame_labels=frame_labels,
+            )
+            payload: Dict[str, Any] = {
+                "orientation_deg": float(ply.orientation_deg),
+                "ply": ply,
+                "plies": [ply],
+                "cracks": structured.get("cracks", []),
+                "densities": structured.get("densities", []),
+                "thresholds": structured.get("thresholds", []),
+                "metrics": structured.get("metrics"),
+                "paths": structured.get("paths", {}),
+                "params": structured.get("params", {}),
+            }
+            results[ply.name] = payload
+        return results
+
     groups = _group_plies_by_orientation(specimen, tolerance=tolerance)
     target_orientations = list(orientations) if orientations is not None else None
-    results: Dict[str, Dict[str, Any]] = {}
 
     def _matches_target(angle: float) -> bool:
         if target_orientations is None:
             return True
         return any(abs(angle - target) <= tolerance for target in target_orientations)
 
-    for angle, plies in groups:
+    for angle, group_plies in groups:
         if not _matches_target(angle):
             continue
-        if not plies:
+        if not group_plies:
             continue
-        primary = plies[0]
-        if len(plies) > 1:
-            duplicate_names = ", ".join(ply.name for ply in plies[1:])
+        primary = group_plies[0]
+        if len(group_plies) > 1:
+            duplicate_names = ", ".join(ply.name for ply in group_plies[1:])
             logger.warning(
-                "Multiple plies found at %.3f°; using '%s' and merging %d duplicates (%s).",
+                "Multiple plies found at %.3f°; using '%s' and merging %d duplicates (%s). "
+                "Pass `plies=[...]` to select specific plies instead.",
                 angle,
                 primary.name,
-                len(plies) - 1,
+                len(group_plies) - 1,
                 duplicate_names,
             )
             primary_signature = (primary.avg_crack_width_px, primary.min_crack_length_px)
-            for candidate in plies[1:]:
+            for candidate in group_plies[1:]:
                 candidate_signature = (candidate.avg_crack_width_px, candidate.min_crack_length_px)
                 if candidate_signature != primary_signature:
                     logger.warning(
@@ -253,10 +324,10 @@ def crack_analysis(
             color_cracks=color_cracks,
             frame_labels=frame_labels,
         )
-        payload: Dict[str, Any] = {
+        payload = {
             "orientation_deg": angle,
             "ply": primary,
-            "plies": plies,
+            "plies": group_plies,
             "cracks": structured.get("cracks", []),
             "densities": structured.get("densities", []),
             "thresholds": structured.get("thresholds", []),
@@ -269,16 +340,16 @@ def crack_analysis(
         results[label] = payload
 
     if target_orientations is not None:
-        missing = [
+        missing_orientations = [
             target
             for target in target_orientations
             if not any(abs(angle - target) <= tolerance for angle, _ in groups)
         ]
-        if missing:
+        if missing_orientations:
             logger.warning(
                 "Requested orientations not found in specimen '%s': %s",
                 specimen.name,
-                ", ".join(str(value) for value in missing),
+                ", ".join(str(value) for value in missing_orientations),
             )
 
     return results

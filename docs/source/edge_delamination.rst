@@ -33,6 +33,29 @@ permits support from any accepted pixel within ``+-3`` columns.
 can provide support. Empty rows cannot be jumped in either mode. The removed
 ``legacy_flood`` mode is no longer available.
 
+The animations below use the same real threshold-candidate crop and seed row,
+so the effect of the connectivity rule can be compared directly. Pixel
+coordinates follow the image convention ``[row, col] = [y, x]``: columns and
+``x`` run horizontally, while rows and ``y`` run vertically.
+
+.. figure:: _static/edge_delamination/seed_ratio_directional.gif
+   :alt: Directional free-edge reconstruction with horizontal lateral support
+   :width: 960
+   :align: center
+
+   **Directional connectivity.** Growth proceeds row by row, and an accepted
+   pixel in the preceding row may provide support within the displayed
+   horizontal :math:`\Delta x` tolerance.
+
+.. figure:: _static/edge_delamination/seed_ratio_columnwise.gif
+   :alt: Columnwise free-edge reconstruction with same-column support
+   :width: 960
+   :align: center
+
+   **Columnwise connectivity.** Growth still proceeds row by row, but support
+   must come from the pixel directly above in the same column
+   (:math:`\Delta x = 0`).
+
 Frame-to-frame latching
 -----------------------
 

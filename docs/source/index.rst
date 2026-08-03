@@ -87,8 +87,8 @@ You can access it at
    :caption: User Guide
    :hidden:
 
-   image_handling
    shift_correction
+   image_handling
    Image_pre_processing
    image_operations
    methodology
