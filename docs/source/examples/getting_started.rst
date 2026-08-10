@@ -50,7 +50,7 @@ plies. More details about the crack detection can be found in :doc:`../detection
    # specimen object
    specimen = Specimen(
        name="01-getting-started",
-       scale_px_mm=41.03328366,
+       scale_px_mm=31.953,
        path_full=str(data_root / "full"),
        path_upper_border=str(data_root / "upper"),
        path_middle=str(data_root / "middle"),
@@ -95,14 +95,14 @@ The output can be used directly for diffuse delamination, as shown in the follow
   # diffuse delamination parameters 
   diffuse_params={
       "window_diffuse": (30, 30),
-      "diffuse_dx": 20.0,
-      "diffuse_dy": 20.0,
+      "diffuse_dx": 40.0,
+      "diffuse_dy": 10.0,
   }
 
   
   # edge delamination parameters
   edge_params={
-      "window_edge": (1, 60),
+      "window_edge": (1, 90),
       "seed_ratio": 0.01,
   }
 
@@ -120,15 +120,17 @@ The suggested parameters for the delamination detection for this example are the
 
 - ``window_edge`` and ``window_diffuse`` are the sizes of the sliding windows used for the edge and diffuse
   detection, respectively. For a window of size ``(wy, wx)``, the image is passed through a maximum filter
-  followed by a minimum filter, both using that window as a rectangular neighbourhood. In practical terms, the
-  window size controls how cracks and noise are filtered out from the delamination detection.
+  followed by a minimum filter, both using that window size. In practise, the
+  window size controls how cracks and noise are filtered out from the delamination detection. A higher window size
+  will filter out more cracks (or any straight thin features) and noise, but there will also risk filtering out delamination.
 - ``diffuse_dx`` and ``diffuse_dy`` are the dimensions of the region of interest (ROI) around each crack used to
   compute the diffuse delamination.
 - ``seed_ratio`` is the fraction of rows, starting from the specimen edge, trusted as the initial seed region for
   edge-connected reconstruction. A ratio of 0.01 seeds from the first 1% of rows in each split half.
 
-More information about these and other parameters can be found in :doc:`../delamination`.
-The outputs of the delamination detection are shown below.
+More information about these and other parameters can be found in
+:doc:`Delamination Detection Methodology <../delamination>`.
+The outputs of the crack and delamination detection with the referred parameters are shown below.
 
 .. image:: ../_static/examples/getting_started_detection_outputs.png
    :alt: Crack detection and classified edge and diffuse delamination outputs for the Getting Started example
@@ -136,105 +138,73 @@ The outputs of the delamination detection are shown below.
    :align: center  
 
 
-
-
 .. image:: ../_static/examples/getting_started_metric_plots.png
    :alt: Crack density and detected delamination plotted against frame number
    :width: 100%
    :align: center
 
-The complete orientation-keyed result from :func:`crack_analysis` can be passed
-directly to combined or standalone diffuse detection. DelaDect validates that
-the orientation outputs have equal frame counts and merges every orientation
-present in the result. To use only selected crack families, filter them during
-analysis:
+
+This minimal example shows how to use DelaDect for a complete analysis of a specimen. To go further and
+take full advantage of the tool's available methods and parameters, continue with
+:doc:`advanced_options`.
+
+
+Using the full frame stack
+------------------------------------
+As mentioned above, a full image can be provided instead of the three separate
+stacks. In this mode the full image is used for crack and diffuse delamination
+detection. For edge delamination, the tool divides each full frame into upper
+and lower halves and processes both free edges with the same edge-seeding.
+
+With this example, it is a good time to introduce the built-in factory methods for specimen creation.
+DelaDect provides two pre-defined layup constructors on :class:`~deladect.specimen.Specimen`:
+
+- :meth:`~deladect.specimen.Specimen.from_cross_ply`, used below, builds a ``[0, 90]`` cross-ply
+  laminate: it automatically creates two plies, at 0° and 90°, and one interface between them.
+- :meth:`~deladect.specimen.Specimen.from_plus_minus` builds a ``[+θ, -θ]`` laminate instead: it
+  creates two plies at ``angle_deg`` and ``-angle_deg`` (plus an optional third ply at 90° when
+  ``transverse_layer=True``), and adds the interface(s) between them automatically.
 
 .. code-block:: python
 
-   crack_results = crack_analysis(specimen, orientations=[90.0])
+   specimen_full = Specimen.from_cross_ply(
+       name="01-getting-started-full",
+       scale_px_mm=31.953,
+       path_full=str(data_root / "full"),
+       image_types=["png"],
+       avg_crack_width_px=14.0,
+       min_crack_length_px=90.0,
+   )
 
-Static-reference preprocessing is selected automatically for this combined,
-single-interface workflow. Rolling-median preprocessing is reserved for the
-multi-interface edge example. Diffuse regions are evaluated independently for
-each frame by default and then latched over time. Pass ``track_cracks=True`` to
-enable cross-frame crack association and the tracked diffuse workflow.
+The detected cracks and classified delamination for the full-image workflow are
+shown below.
 
-Why the full stack is still supplied
-------------------------------------
-
-``path_full`` is currently required by :class:`deladect.specimen.Specimen`.
-DelaDect does not automatically create ``image_stack_full`` by vertically
-joining the upper, middle, and lower stacks during specimen initialization.
-If ``path_full`` is omitted, automatic stack initialization raises
-``ValueError: Specimen requires a valid path_full to initialise the image stack.``
-
-When all three region paths are supplied, they override where the component
-algorithms evaluate damage: cracks use ``middle`` and primary edge detection
-uses ``upper`` plus ``lower``. The full stack is still used for combined
-preprocessing and as the background for full-frame overlays. Some individual
-region detector paths can internally stack the three regions as an overlay
-fallback, but this is not a general replacement for ``path_full`` and does not
-make the combined Getting Started workflow work without it.
-
-Results to inspect
-------------------
-
-- ``results/01-getting-started/cracks/`` contains crack overlays and bundles.
-- ``results/01-getting-started/delamination/both/overlays/`` contains the
-  classified edge/diffuse overlays.
-- ``results/01-getting-started/delamination/both/metrics/frame_metrics.csv``
-  contains edge, diffuse, overlap, and combined fractions.
-- ``results/01-getting-started/config/specimen.json`` stores the reloadable
-  specimen definition and result references.
-
-Full-image comparison: connected edge regions
----------------------------------------------
-
-This section describes a separate, intentionally unconstrained full-image
-experiment; it is not output from the split-region Getting Started run above.
-In that comparison, frame 0003 illustrates a classification limitation that
-occurs when edge detection is run on the full image rather than constrained to
-the explicit upper and lower regions. Delamination growing inward from the
-upper and lower specimen boundaries has connected into one edge-mask component.
-That component touches both boundaries and also occupies part of the specimen
-middle, where diffuse delamination may physically be present.
-
-The combined workflow resolves overlap with edge precedence:
-
-.. math::
-
-   M_{\mathrm{diffuse,final}} =
-   M_{\mathrm{diffuse,raw}} \cap \neg M_{\mathrm{edge,exclusion}}
-
-Consequently, a diffuse candidate is classified exclusively as edge wherever
-the masks overlap. In the unconstrained comparison, 26,032 of 26,058
-diffuse-candidate pixels (99.90 percent) overlap the edge-exclusion mask. Only
-26 diffuse pixels survive in the complete frame. By contrast, the verified
-split-region Getting Started run produces 662,041 diffuse candidates, 5,327
-overlapping pixels (0.80 percent), and 656,714 surviving diffuse pixels for
-frame 0003. The square-cell diagram below shows the unconstrained mask
-relationship over the full specimen height in a representative 600-pixel-wide
-region.
-
-.. figure:: ../_static/examples/connected_edge_square_masks.svg
-   :alt: Connected edge delamination limitation in Sample-1 frame 0003
+.. image:: ../_static/examples/getting_started_full_detection_outputs.png
+   :alt: Full-image crack detection and classified edge and diffuse delamination outputs
    :width: 100%
    :align: center
 
-   Sample-1 frame 0003, shown as 30-by-30-pixel square cells over the full
-   specimen height. Panel 1 isolates the edge component that touches both the
-   upper and lower boundaries. Panel 2 shows diffuse candidates as green
-   vertical stripes over the pale-red edge mask. In panel 3, those stripes are
-   red because edge precedence overwrites the overlapping diffuse label.
+The following plots compare the region-based and full-image workflows directly.
+Solid lines represent the separate-region analysis and dashed lines represent
+the full-image analysis. Delamination is reported as detected pixel area, in
+px\ :sup:`2`, rather than area fraction, so the underlying mask sizes can be
+compared directly.
 
-This demonstrates ambiguity in the classification rule, not proof of the
-physical damage class at every pixel. Once edge regions connect through the
-middle, DelaDect cannot represent coexisting edge and diffuse labels there.
-The explicit region configuration used by this Getting Started example avoids
-that specific failure mode by preventing the edge detector from evaluating the
-middle rows.
+.. image:: ../_static/examples/getting_started_full_vs_regions_metric_plots.png
+   :alt: Crack density and detected delamination pixel area compared between region and full-image workflows
+   :width: 100%
+   :align: center
 
-Continue with :doc:`advanced_options` to control the image regions explicitly.
+
+The plots show that, because the diffuse-detection domain is larger for the full image, more diffuse delamination is
+detected. By splitting the image into regions, diffuse detection is restricted to the middle region, so any diffuse damage
+close to the specimen edge is simply outside that domain and cannot be detected. For this specific sample, using the
+full image is therefore the better choice. In other cases, however, where edge and diffuse delamination
+grow into contact with each other, splitting the image into regions can be preferable, since edge delamination must be
+connected to the specimen edge, and takes precedence over diffuse delamination wherever the two overlap, so an
+unconstrained full-image analysis can misclassify diffuse damage as edge damage once they connect. For a deeper
+understanding of this mechanism, see :doc:`../delamination`, which includes further examples and explanations.
+
 
 References
 ----------

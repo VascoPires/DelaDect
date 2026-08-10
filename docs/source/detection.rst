@@ -123,6 +123,36 @@ Passing the complete result merges every analyzed orientation frame by frame.
 Restrict the diffuse crack families with
 ``crack_analysis(specimen, orientations=[...])`` when needed.
 
+Tuning edge and diffuse windows
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The only settings overridden below are ``window_edge`` (edge) and
+``window_diffuse`` (diffuse); everything else in ``edge_params`` /
+``diffuse_params`` is left at its default:
+
+.. code-block:: python
+
+   # diffuse delamination parameters
+   diffuse_params = {
+       "window_diffuse": (30, 30),
+       "diffuse_dx": 20.0,
+       "diffuse_dy": 20.0,
+   }
+
+   # edge delamination parameters
+   edge_params = {
+       "window_edge": (1, 60),
+       "seed_ratio": 0.01,
+   }
+
+   combined = detector.detect_both_delaminations(
+       cracks=crack_results,
+       save_masks=True,
+       save_metrics=True,
+       edge_params=edge_params,
+       diffuse_params=diffuse_params,
+   )
+
 Troubleshooting quick notes
 ---------------------------
 - ``ImportError: crackdect is required``: install and activate an environment

@@ -1,4 +1,4 @@
-"""Run the smallest complete crack and delamination analysis."""
+"""Run the Getting Started analysis using only the full-frame image stack."""
 
 from pathlib import Path
 
@@ -14,20 +14,31 @@ RESULTS_ROOT = REPO_ROOT / "results"
 def main() -> None:
     data_root = REPO_ROOT / "example_images" / "sample-1"
     specimen = Specimen(
-        name="01-getting-started",
+        name="01-getting-started-full",
         scale_px_mm=31.953,
         path_full=str(data_root / "full"),
-        path_upper_border=str(data_root / "upper"),
-        path_middle=str(data_root / "middle"),
-        path_lower_border=str(data_root / "lower"),
         sorting_key="_sc",
         image_types=["png"],
         results_root=str(RESULTS_ROOT),
         avg_crack_width_px=14.0,
     )
-    ply0 = specimen.add_ply(name="ply_0", orientation_deg=0.0, avg_crack_width_px=14.0, min_crack_length_px=90.0)
-    ply90 = specimen.add_ply(name="ply_90", orientation_deg=90.0, avg_crack_width_px=14.0, min_crack_length_px=90.0)
-    interface = specimen.add_interface(name="i0", upper_ply_index=ply0, lower_ply_index=ply90)
+    ply0 = specimen.add_ply(
+        name="ply_0",
+        orientation_deg=0.0,
+        avg_crack_width_px=14.0,
+        min_crack_length_px=90.0,
+    )
+    ply90 = specimen.add_ply(
+        name="ply_90",
+        orientation_deg=90.0,
+        avg_crack_width_px=14.0,
+        min_crack_length_px=90.0,
+    )
+    interface = specimen.add_interface(
+        name="i0",
+        upper_ply_index=ply0,
+        lower_ply_index=ply90,
+    )
 
     crack_results = crack_analysis(
         specimen,

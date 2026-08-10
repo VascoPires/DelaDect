@@ -1087,6 +1087,7 @@ class Specimen:
         path_upper_border: Optional[str] = None,
         path_lower_border: Optional[str] = None,
         path_middle: Optional[str] = None,
+        min_crack_length_px: Optional[float] = None,
         **kwargs: Any,
     ) -> "Specimen":
         """Create a [+θ, -θ] laminate with two plies (optionally add 90°).
@@ -1094,6 +1095,9 @@ class Specimen:
         One interface is added automatically between ``+θ`` and ``-θ``. If
         ``transverse_layer`` is ``True``, a second interface is added
         between ``-θ`` and the 90° ply.
+
+        ``min_crack_length_px``, if given, is applied to every ply created
+        (equivalent to passing it to each :meth:`add_ply` call manually).
 
         Example
         -------
@@ -1119,6 +1123,7 @@ class Specimen:
             path_upper_border=path_upper_border,
             path_lower_border=path_lower_border,
             path_middle=path_middle,
+            min_crack_length_px=min_crack_length_px,
             **kwargs,
         )
         specimen._add_consecutive_interfaces(orientations)
@@ -1137,6 +1142,7 @@ class Specimen:
         path_upper_border: Optional[str] = None,
         path_lower_border: Optional[str] = None,
         path_middle: Optional[str] = None,
+        min_crack_length_px: Optional[float] = None,
         **kwargs: Any,
     ) -> "Specimen":
         """Create a cross-ply laminate [0, 90].
@@ -1145,6 +1151,9 @@ class Specimen:
         ``"0/90"`` interface is added automatically between the two plies.
         A custom ``angles`` sequence adds no interfaces; call
         :meth:`add_interface` yourself in that case.
+
+        ``min_crack_length_px``, if given, is applied to every ply created
+        (equivalent to passing it to each :meth:`add_ply` call manually).
 
         Example
         -------
@@ -1167,6 +1176,7 @@ class Specimen:
             path_upper_border=path_upper_border,
             path_lower_border=path_lower_border,
             path_middle=path_middle,
+            min_crack_length_px=min_crack_length_px,
             **kwargs,
         )
         if angles is None:
@@ -1186,6 +1196,7 @@ class Specimen:
         path_upper_border: Optional[str] = None,
         path_lower_border: Optional[str] = None,
         path_middle: Optional[str] = None,
+        min_crack_length_px: Optional[float] = None,
         **kwargs: Any,
     ) -> "Specimen":
         """Build a specimen and populate plies from an orientation sequence."""
@@ -1201,7 +1212,11 @@ class Specimen:
             **kwargs,
         )
         for idx, orientation in enumerate(orientations):
-            specimen.add_ply(name=f"ply_{idx}", orientation_deg=float(orientation))
+            specimen.add_ply(
+                name=f"ply_{idx}",
+                orientation_deg=float(orientation),
+                min_crack_length_px=min_crack_length_px,
+            )
         return specimen
 
     @staticmethod

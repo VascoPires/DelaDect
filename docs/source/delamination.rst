@@ -68,6 +68,45 @@ Combined detection runs both pipelines, resolves overlaps in favour of edge
 delamination, and can apply an edge-exclusion halo (``edge_exclusion_px``).
 Reported fractions are decimal values in ``[0, 1]``.
 
+Full-image comparison: connected edge regions
+"""""""""""""""""""""""""""""""""""""""""""""
+This section describes a separate, intentionally unconstrained full-image
+experiment; it is not output from the split-region :doc:`examples/getting_started`
+run. In that comparison, frame 0003 illustrates a classification limitation
+that occurs when edge detection is run on the full image rather than
+constrained to explicit upper and lower regions. Delamination growing inward
+from the upper and lower specimen boundaries has connected into one edge-mask
+component. That component touches both boundaries and also occupies part of
+the specimen middle, where diffuse delamination may physically be present.
+
+The combined workflow resolves overlap with edge precedence: a diffuse
+candidate is classified exclusively as edge wherever the masks overlap. In
+the unconstrained comparison, 26,032 of 26,058 diffuse-candidate pixels
+(99.90 percent) overlap the edge-exclusion mask. Only 26 diffuse pixels
+survive in the complete frame. By contrast, the verified split-region
+Getting Started run produces 662,041 diffuse candidates, 5,327 overlapping
+pixels (0.80 percent), and 656,714 surviving diffuse pixels for frame 0003.
+The square-cell diagram below shows the unconstrained mask relationship over
+the full specimen height in a representative 600-pixel-wide region.
+
+.. figure:: _static/examples/connected_edge_square_masks.svg
+   :alt: Connected edge delamination limitation in Sample-1 frame 0003
+   :width: 100%
+   :align: center
+
+   Sample-1 frame 0003, shown as 30-by-30-pixel square cells over the full
+   specimen height. Panel 1 isolates the edge component that touches both the
+   upper and lower boundaries. Panel 2 shows diffuse candidates as green
+   vertical stripes over the pale-red edge mask. In panel 3, those stripes are
+   red because edge precedence overwrites the overlapping diffuse label.
+
+This demonstrates ambiguity in the classification rule, not proof of the
+physical damage class at every pixel. Once edge regions connect through the
+middle, DelaDect cannot represent coexisting edge and diffuse labels there.
+The explicit region configuration used by the Getting Started example avoids
+that specific failure mode by preventing the edge detector from evaluating
+the middle rows.
+
 Multi-interface edge progression
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 ``detect_edge_multi`` promotes damage across an ordered interface list
