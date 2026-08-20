@@ -41,19 +41,6 @@ Functions
    crack_eval
    plot_cracks
 
-Deprecated compatibility functions
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-The following functions remain available during the DelaDect 1.x series but
-new code should use :func:`crack_analysis` instead.
-
-.. autosummary::
-   :toctree: generated
-
-   crack_eval_by_orientation
-   crack_eval_crossply
-   crack_eval_plus_minus
-
 Coordinate convention
 ---------------------
 Crack segments follow ``[row, col]`` ordering (equivalent to ``[y, x]``).

@@ -20,4 +20,17 @@ try:  # pragma: no cover - metadata not available during editable installs
 except PackageNotFoundError:  # pragma: no cover
     __version__ = "0.0.0"
 
-__all__ = ["__version__"]
+# Re-export the entry points every workflow starts from, so `import deladect`
+# alone is enough to reach `deladect.Specimen`, `deladect.DelaminationDetector`,
+# etc. -- the submodule imports (`deladect.specimen`, `deladect.detection`)
+# remain available for everything else.
+from .specimen import Specimen  # noqa: E402
+from .detection import DelaminationDetector, crack_analysis, plot_cracks  # noqa: E402
+
+__all__ = [
+    "__version__",
+    "Specimen",
+    "DelaminationDetector",
+    "crack_analysis",
+    "plot_cracks",
+]

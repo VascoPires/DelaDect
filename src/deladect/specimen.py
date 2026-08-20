@@ -103,6 +103,20 @@ DEFAULT_PRIMARY_DELAMINATION_COLOR: Color = rgba_from_hex("#E53935", 0.9)
 DEFAULT_SECONDARY_DELAMINATION_COLOR: Color = rgba_from_hex("#1E88E5", 0.75)
 
 
+def _select_strain_column(df: pd.DataFrame, *, source: str) -> pd.DataFrame:
+    """Return the ``strain_y`` column as its own single-column DataFrame.
+
+    Raises a clear ``ValueError`` naming ``source`` (the file the data came
+    from) instead of letting a missing column surface as a raw pandas
+    ``KeyError`` from inside specimen construction or data upload.
+    """
+    if "strain_y" not in df.columns:
+        raise ValueError(
+            f"{source} must contain a 'strain_y' column; found columns: {list(df.columns)}"
+        )
+    return df[["strain_y"]]
+
+
 if sys.version_info >= (3, 10):
     _dataclass = dataclass
     _dataclass_kwargs = {"slots": True}
@@ -210,7 +224,10 @@ class Specimen:
 
     Args:
         name: Identifier for the specimen (used in filenames and manifests).
-        scale_px_mm: Conversion factor from millimetres to pixels (px/mm).
+        scale_px_mm: Conversion factor from millimetres to pixels (px/mm). If
+            omitted, defaults to ``1.0`` and a warning is emitted, since all
+            length/area/spacing results will then be reported in pixels
+            rather than millimetres.
         path_full: Directory containing the full specimen view frames (required).
         path_upper_border: Directory with images describing the upper border (optional).
         path_lower_border: Directory with images describing the lower border (optional).
@@ -245,11 +262,11 @@ class Specimen:
     ...     image_types=[".png"],
     ... )
     >>> specimen.add_ply(name="plus45", orientation_deg=45.0)
-    >>> specimen.add_interface(name="top_interface", upper_ply_index=0, lower_ply_index=0)
+    >>> specimen.add_interface(name="top_interface", upper_ply=0, lower_ply=0)
     """
 
     name: str
-    scale_px_mm: float
+    scale_px_mm: Optional[float] = field(default=None, kw_only=True)
     path_full: str
     image_types: List[str]
     sorting_key: str = "_sc"
@@ -290,6 +307,16 @@ class Specimen:
         never creates result folders or writes a configuration file.  Call
         :meth:`save_config` when the specimen definition is complete.
         """
+        if self.scale_px_mm is None:
+            warnings.warn(
+                "scale_px_mm not provided; crack/delamination lengths, spacings, and "
+                "areas will be reported in pixels (px), not millimetres (mm). Pass "
+                "scale_px_mm to convert results to physical units.",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+            self.scale_px_mm = 1.0
+
         backend = (self.stack_backend or "auto").lower()
         if backend not in {"auto", "memory", "sql"}:
             raise ValueError('stack_backend must be "auto", "memory", or "sql"')
@@ -305,7 +332,7 @@ class Specimen:
 
         if self.strain_csv is not None:
             df = pd.read_csv(self.strain_csv)
-            self.experimental_data = df[["strain_y"]].reset_index(drop=True)
+            self.experimental_data = _select_strain_column(df, source=str(self.strain_csv)).reset_index(drop=True)
 
         self._normalize_interface_indices()
 
@@ -350,21 +377,27 @@ class Specimen:
             )
         return component
 
-    def resolve_results_root(self, results_root: Optional[str] = None) -> Path:
-        """Returns the base results folder for this specimen. In this folder
-        all the results related to this specimen will be stored. 
-        If the folder does not exist, it is created."""
+    def _resolve_results_root(self, results_root: Optional[str] = None) -> Path:
+        """Return (and create) the base results folder, optionally overridden.
+
+        Internal helper for :meth:`results_dir`. Use :meth:`results_root_path`
+        instead if you just want to know the path without creating it.
+        """
         base = self._build_results_root(results_root)
         base.mkdir(parents=True, exist_ok=True)
         return base
-    
+
     def results_dir(self, *parts: str, results_root: Optional[str] = None) -> Path:
         """Return a writable directory contained in this specimen's result root.
 
-        Each ``parts`` entry must be a single relative directory component.
-        Use ``results_root`` to intentionally select a different output root.
+        Creates the directory (and the results root itself) if it doesn't
+        already exist. Each ``parts`` entry must be a single relative
+        directory component. Use ``results_root`` to intentionally select a
+        different output root than the specimen's own. For a read-only,
+        non-creating lookup of the specimen's own results root, use
+        :meth:`results_root_path` instead.
         """
-        base = self.resolve_results_root(results_root)
+        base = self._resolve_results_root(results_root)
         for part in parts:
             if part:
                 base /= self._validate_result_component(part, label="results directory part")
@@ -372,7 +405,12 @@ class Specimen:
         return base
 
     def results_root_path(self) -> Path:
-        """Return the base results folder for this specimen."""
+        """Return this specimen's own results root, without creating it.
+
+        Unlike :meth:`results_dir`, this never touches the filesystem — it's
+        a plain lookup of where results *would* go. Use :meth:`results_dir`
+        when you actually need the directory to exist.
+        """
         return Path(self._results_root)
 
     def config_path(self) -> Path:
@@ -881,16 +919,16 @@ class Specimen:
         interface: Optional[Interface] = None,
         *,
         name: Optional[str] = None,
-        upper_ply_index: Optional[Union[int, Ply]] = None,
-        lower_ply_index: Optional[Union[int, Ply]] = None,
+        upper_ply: Optional[Union[int, Ply]] = None,
+        lower_ply: Optional[Union[int, Ply]] = None,
         enabled: bool = True,
         delamination_color_rgba: Optional[Color] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Interface:
         """Append an interface, optionally constructing one from keyword arguments.
 
-        ``upper_ply_index``/``lower_ply_index`` accept either an integer index
-        into ``self.plies`` or the :class:`Ply` object itself (e.g. the value
+        ``upper_ply``/``lower_ply`` accept either an integer index into
+        ``self.plies`` or the :class:`Ply` object itself (e.g. the value
         returned by :meth:`add_ply`), which is resolved to its index.
 
         When ply indices are omitted, DelaDect applies firesafe inference:
@@ -901,19 +939,19 @@ class Specimen:
 
         Example
         -------
-        >>> specimen.add_interface(name=\"0/90\", upper_ply_index=0, lower_ply_index=1)
+        >>> specimen.add_interface(name=\"0/90\", upper_ply=0, lower_ply=1)
         >>> specimen.add_interface(name=\"top_interface\")
         >>> ply0 = specimen.add_ply(name=\"ply_0\", orientation_deg=0.0)
         >>> ply90 = specimen.add_ply(name=\"ply_90\", orientation_deg=90.0)
-        >>> specimen.add_interface(name=\"0/90\", upper_ply_index=ply0, lower_ply_index=ply90)
+        >>> specimen.add_interface(name=\"0/90\", upper_ply=ply0, lower_ply=ply90)
         """
         if interface is None:
             if name is None:
                 raise ValueError("name is required for new interfaces.")
             interface = Interface(
                 name=name,
-                upper_ply_index=self._resolve_ply_index(upper_ply_index, label="upper_ply_index"),
-                lower_ply_index=self._resolve_ply_index(lower_ply_index, label="lower_ply_index"),
+                upper_ply_index=self._resolve_ply_index(upper_ply, label="upper_ply"),
+                lower_ply_index=self._resolve_ply_index(lower_ply, label="lower_ply"),
                 enabled=enabled,
                 delamination_color_rgba=delamination_color_rgba or DEFAULT_PRIMARY_DELAMINATION_COLOR,
                 metadata=metadata or {},
@@ -1050,7 +1088,7 @@ class Specimen:
             df = pd.read_csv(data_path)
         else:
             df = pd.read_excel(data_path, sheet_name=sheet_name)
-        df_filtered = df.loc[n0:nf:nstep, ["strain_y"]].reset_index(drop=True)
+        df_filtered = _select_strain_column(df.loc[n0:nf:nstep], source=data_path).reset_index(drop=True)
         self.experimental_data = df_filtered
         return df_filtered
 
@@ -1080,7 +1118,7 @@ class Specimen:
         name: str,
         angle_deg: float,
         transverse_layer: bool = False,
-        scale_px_mm: float,
+        scale_px_mm: Optional[float] = None,
         path_full: str,
         image_types: List[str],
         sorting_key: str = "_sc",
@@ -1134,7 +1172,7 @@ class Specimen:
         cls,
         *,
         name: str,
-        scale_px_mm: float,
+        scale_px_mm: Optional[float] = None,
         path_full: str,
         image_types: List[str],
         sorting_key: str = "_sc",
@@ -1189,7 +1227,7 @@ class Specimen:
         *,
         name: str,
         orientations: Sequence[float],
-        scale_px_mm: float,
+        scale_px_mm: Optional[float] = None,
         path_full: str,
         image_types: List[str],
         sorting_key: str = "_sc",
@@ -1233,7 +1271,7 @@ class Specimen:
         """
         for idx in range(len(orientations) - 1):
             name = f"{self._format_angle(orientations[idx])}/{self._format_angle(orientations[idx + 1])}"
-            self.add_interface(name=name, upper_ply_index=idx, lower_ply_index=idx + 1)
+            self.add_interface(name=name, upper_ply=idx, lower_ply=idx + 1)
 
 
 __all__ = [

@@ -1,0 +1,13 @@
+# Normalize line endings to LF in the repository regardless of the
+# platform/editor a file was checked out or edited on. This is what stops
+# CRLF/LF churn from showing up as full-file diffs.
+* text=auto eol=lf
+
+# Explicit binary types (skip line-ending normalization and diffing).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.npz binary
+*.ico binary

@@ -150,3 +150,9 @@ media/
 Tex/
 Text/
 partial_movie_files/
+
+# Dev-only assets and scripts kept locally, not published in the repo
+/tests/
+/flowchart.png
+/idea.png
+/render_animations.py

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 import numpy as np
 
@@ -39,8 +39,39 @@ def crack_px_mm(crack_list: Sequence[Sequence[Sequence[float]]], scale: float) -
     return scaled
 
 
+def draw_crack_segments(
+    ax: Any,
+    cracks: Optional[Sequence[np.ndarray]],
+    *,
+    color: Any,
+    linewidth: float,
+) -> None:
+    """Plot each crack segment ``[[row0, col0], [row1, col1]]`` onto ``ax``.
+
+    Shared by :func:`deladect.detection.crack_detection.plot_cracks`
+    (standalone crack figures) and
+    :mod:`deladect.detection.delamination._overlays` (cracks composited on
+    top of delamination overlays). Malformed segments (wrong shape,
+    non-numeric) are skipped rather than raising, since this is used in
+    overlay-compositing contexts where a single bad segment shouldn't abort
+    the whole render.
+    """
+    if cracks is None:
+        return
+    for segment in cracks:
+        try:
+            arr = np.asarray(segment, dtype=float).reshape(-1, 2)
+        except Exception:
+            continue
+        if arr.shape[0] < 2:
+            continue
+        (y0, x0), (y1, x1) = arr[:2]
+        ax.plot((x0, x1), (y0, y1), color=color, linewidth=linewidth, linestyle="-")
+
+
 __all__ = [
     "crack_length",
     "crack_mid_point",
     "crack_px_mm",
+    "draw_crack_segments",
 ]

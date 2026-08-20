@@ -56,14 +56,14 @@ plies. More details about the crack detection can be found in :doc:`../detection
        path_middle=str(data_root / "middle"),
        path_lower_border=str(data_root / "lower"),
        image_types=["png"],
-       avg_crack_width_px=14.0,
+       avg_crack_width_px=8.0,
    )
    
    # add plies to the specimen and defines orientation of the cracks
-   ply90 = specimen.add_ply(name="ply_90", orientation_deg=90.0, avg_crack_width_px=14.0, min_crack_length_px=90.0)
-   ply0 = specimen.add_ply(name="ply_0", orientation_deg=0.0, avg_crack_width_px=14.0, min_crack_length_px=90.0)
+   ply0 = specimen.add_ply(name="ply_0", orientation_deg=0.0, avg_crack_width_px=8.0, min_crack_length_px=90.0)
+   ply90 = specimen.add_ply(name="ply_90", orientation_deg=90.0, avg_crack_width_px=8.0, min_crack_length_px=90.0)
 
-   interface = specimen.add_interface(name="i0", upper_ply_index=ply90, lower_ply_index=ply0)
+   interface = specimen.add_interface(name="i0", upper_ply=ply0, lower_ply=ply90)
 
 After the specimen is created, the crack detection can be run with :func:`crack_analysis`. This step is only required
 if diffuse delamination is required for the analysis.
@@ -80,6 +80,7 @@ if diffuse delamination is required for the analysis.
 For the crack analysis, the main parameters used are ``avg_crack_width_px`` and ``min_crack_length_px``,
 and those are defined in the ply object and are inherited from
 `CrackDect <https://crackdect.readthedocs.io/en/latest/index.html>`_ [Drvoderic2022]_.
+This example uses ``avg_crack_width_px=8.0`` consistently for the specimen and both plies.
 
 The output of the function is a structured dictionary with the crack detection results for each orientation. 
 The output can be used directly for diffuse delamination, as shown in the following code snippet.
@@ -92,19 +93,19 @@ The output can be used directly for diffuse delamination, as shown in the follow
        save_preprocess_outputs=True,
    )
 
-  # diffuse delamination parameters 
-  diffuse_params={
-      "window_diffuse": (30, 30),
-      "diffuse_dx": 40.0,
-      "diffuse_dy": 10.0,
-  }
+   # diffuse delamination parameters
+   diffuse_params={
+       "window_diffuse": (30, 30),
+       "diffuse_dx": 40.0,
+       "diffuse_dy": 10.0,
+   }
 
   
-  # edge delamination parameters
-  edge_params={
-      "window_edge": (1, 90),
-      "seed_ratio": 0.01,
-  }
+   # edge delamination parameters
+   edge_params={
+       "window_edge": (1, 90),
+       "seed_ratio": 0.01,
+   }
 
 
    # performs both edge and diffuse delamination
@@ -172,7 +173,7 @@ DelaDect provides two pre-defined layup constructors on :class:`~deladect.specim
        scale_px_mm=31.953,
        path_full=str(data_root / "full"),
        image_types=["png"],
-       avg_crack_width_px=14.0,
+       avg_crack_width_px=8.0,
        min_crack_length_px=90.0,
    )
 

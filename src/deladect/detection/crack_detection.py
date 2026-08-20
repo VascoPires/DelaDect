@@ -30,6 +30,7 @@ from deladect.io.cracks import (
     save_cracks as save_crack_bundle,
 )
 from deladect.specimen import Ply, Specimen
+from deladect.utils import draw_crack_segments
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +201,27 @@ def _resolve_requested_plies(
     return resolved
 
 
+def _build_crack_analysis_payload(
+    structured: Dict[str, Any],
+    *,
+    orientation_deg: float,
+    ply: Ply,
+    plies: List[Ply],
+) -> Dict[str, Any]:
+    """Build one ``crack_analysis()`` result entry from a ``crack_eval()`` result."""
+    return {
+        "orientation_deg": orientation_deg,
+        "ply": ply,
+        "plies": plies,
+        "cracks": structured.get("cracks", []),
+        "densities": structured.get("densities", []),
+        "thresholds": structured.get("thresholds", []),
+        "metrics": structured.get("metrics"),
+        "paths": structured.get("paths", {}),
+        "params": structured.get("params", {}),
+    }
+
+
 def crack_analysis(
     specimen: Specimen,
     *,
@@ -241,36 +263,29 @@ def crack_analysis(
         raise ValueError("Pass only one of `orientations` or `plies`, not both.")
 
     results: Dict[str, Dict[str, Any]] = {}
+    common_eval_kwargs: Dict[str, Any] = dict(
+        crack_width_px=crack_width_px,
+        min_crack_size_px=min_crack_size_px,
+        export_images=export_images,
+        background=background,
+        comparison=comparison,
+        save_cracks=save_cracks,
+        results_dir=results_dir,
+        use_full_stack=use_full_stack,
+        color_cracks=color_cracks,
+        frame_labels=frame_labels,
+    )
 
     if plies is not None:
         requested_plies = _resolve_requested_plies(specimen, plies)
         for ply in requested_plies:
-            structured = crack_eval(
-                specimen,
+            structured = crack_eval(specimen, ply=ply, **common_eval_kwargs)
+            results[ply.name] = _build_crack_analysis_payload(
+                structured,
+                orientation_deg=float(ply.orientation_deg),
                 ply=ply,
-                crack_width_px=crack_width_px,
-                min_crack_size_px=min_crack_size_px,
-                export_images=export_images,
-                background=background,
-                comparison=comparison,
-                save_cracks=save_cracks,
-                results_dir=results_dir,
-                use_full_stack=use_full_stack,
-                color_cracks=color_cracks,
-                frame_labels=frame_labels,
+                plies=[ply],
             )
-            payload: Dict[str, Any] = {
-                "orientation_deg": float(ply.orientation_deg),
-                "ply": ply,
-                "plies": [ply],
-                "cracks": structured.get("cracks", []),
-                "densities": structured.get("densities", []),
-                "thresholds": structured.get("thresholds", []),
-                "metrics": structured.get("metrics"),
-                "paths": structured.get("paths", {}),
-                "params": structured.get("params", {}),
-            }
-            results[ply.name] = payload
         return results
 
     groups = _group_plies_by_orientation(specimen, tolerance=tolerance)
@@ -310,34 +325,13 @@ def crack_analysis(
                     )
                     break
 
-        structured = crack_eval(
-            specimen,
+        structured = crack_eval(specimen, ply=primary, **common_eval_kwargs)
+        results[_orientation_label(angle)] = _build_crack_analysis_payload(
+            structured,
+            orientation_deg=angle,
             ply=primary,
-            crack_width_px=crack_width_px,
-            min_crack_size_px=min_crack_size_px,
-            export_images=export_images,
-            background=background,
-            comparison=comparison,
-            save_cracks=save_cracks,
-            results_dir=results_dir,
-            use_full_stack=use_full_stack,
-            color_cracks=color_cracks,
-            frame_labels=frame_labels,
+            plies=group_plies,
         )
-        payload = {
-            "orientation_deg": angle,
-            "ply": primary,
-            "plies": group_plies,
-            "cracks": structured.get("cracks", []),
-            "densities": structured.get("densities", []),
-            "thresholds": structured.get("thresholds", []),
-            "metrics": structured.get("metrics"),
-            "paths": structured.get("paths", {}),
-            "params": structured.get("params", {}),
-        }
-
-        label = _orientation_label(angle)
-        results[label] = payload
 
     if target_orientations is not None:
         missing_orientations = [
@@ -353,132 +347,6 @@ def crack_analysis(
             )
 
     return results
-
-
-def _warn_deprecated_crack_api(name: str) -> None:
-    warnings.warn(
-        f"{name}() is deprecated; use crack_analysis(specimen, ...) instead. "
-        "It may be removed in DelaDect 2.0.",
-        DeprecationWarning,
-        stacklevel=3,
-    )
-
-
-def crack_eval_by_orientation(
-    specimen: Specimen,
-    *,
-    orientations: Optional[Sequence[float]] = None,
-    tolerance: float = 1e-3,
-    crack_width_px: Optional[float] = None,
-    min_crack_size_px: Optional[float] = None,
-    export_images: bool = False,
-    background: bool = False,
-    comparison: bool = False,
-    save_cracks: bool = False,
-    results_dir: Optional[str] = None,
-    use_full_stack: Optional[bool] = None,
-    color_cracks: str = "red",
-    frame_labels: Optional[List[str]] = None,
-) -> Dict[str, Dict[str, Any]]:
-    """Deprecated compatibility wrapper for :func:`crack_analysis`."""
-    _warn_deprecated_crack_api("crack_eval_by_orientation")
-    return crack_analysis(
-        specimen,
-        orientations=orientations,
-        tolerance=tolerance,
-        crack_width_px=crack_width_px,
-        min_crack_size_px=min_crack_size_px,
-        export_images=export_images,
-        background=background,
-        comparison=comparison,
-        save_cracks=save_cracks,
-        results_dir=results_dir,
-        use_full_stack=use_full_stack,
-        color_cracks=color_cracks,
-        frame_labels=frame_labels,
-    )
-
-
-def crack_eval_crossply(
-    specimen: Specimen,
-    *,
-    crack_width_px: Optional[float] = None,
-    min_crack_size_px: Optional[float] = None,
-    export_images: bool = False,
-    background: bool = False,
-    comparison: bool = False,
-    save_cracks: bool = False,
-    results_dir: Optional[str] = None,
-    use_full_stack: Optional[bool] = None,
-    color_cracks: str = "red",
-    tolerance: float = 1e-3,
-) -> Dict[str, Dict[str, Any]]:
-    """Evaluate a cross-ply laminate at 0 and 90 degrees.
-
-    Deprecated compatibility wrapper for :func:`crack_analysis`.
-    """
-    _warn_deprecated_crack_api("crack_eval_crossply")
-    return crack_analysis(
-        specimen,
-        orientations=[0.0, 90.0],
-        tolerance=tolerance,
-        crack_width_px=crack_width_px,
-        min_crack_size_px=min_crack_size_px,
-        export_images=export_images,
-        background=background,
-        comparison=comparison,
-        save_cracks=save_cracks,
-        results_dir=results_dir,
-        use_full_stack=use_full_stack,
-        color_cracks=color_cracks,
-    )
-
-
-def crack_eval_plus_minus(
-    specimen: Specimen,
-    theta: float,
-    *,
-    transverse_layer: bool = False,
-    crack_width_px: Optional[float] = None,
-    min_crack_size_px: Optional[float] = None,
-    export_images: bool = False,
-    background: bool = False,
-    comparison: bool = False,
-    save_cracks: bool = False,
-    results_dir: Optional[str] = None,
-    use_full_stack: Optional[bool] = None,
-    color_cracks: str = "red",
-    tolerance: float = 1e-3,
-    frame_labels: Optional[List[str]] = None,
-) -> Dict[str, Dict[str, Any]]:
-    """Deprecated plus/minus compatibility wrapper for :func:`crack_analysis`.
-
-    Parameters
-    ----------
-    theta:
-        Positive laminate angle. Detection is performed for ``+theta`` and ``-theta``.
-    transverse_layer:
-        If ``True``, also evaluate 90-degree cracks.
-    """
-    orientations: List[float] = [float(theta), float(-theta)]
-    if transverse_layer:
-        orientations.append(90.0)
-    _warn_deprecated_crack_api("crack_eval_plus_minus")
-    return crack_analysis(
-        specimen,
-        orientations=orientations,
-        tolerance=tolerance,
-        crack_width_px=crack_width_px,
-        min_crack_size_px=min_crack_size_px,
-        export_images=export_images,
-        background=background,
-        comparison=comparison,
-        save_cracks=save_cracks,
-        results_dir=results_dir,
-        use_full_stack=use_full_stack,
-        color_cracks=color_cracks,
-        frame_labels=frame_labels,
-    )
 
 
 def plot_cracks(
@@ -521,12 +389,7 @@ def plot_cracks(
     if background_flag:
         vmin, vmax = (0, np.iinfo(frame.dtype).max) if np.issubdtype(frame.dtype, np.integer) else (None, None)
         ax.imshow(frame, cmap="gray", vmin=vmin, vmax=vmax)
-    if cracks is not None:
-        for segment in cracks:
-            if len(segment) != 2:
-                continue
-            (y0, x0), (y1, x1) = segment
-            ax.plot((x0, x1), (y0, y1), color=color, linewidth=linewidth, linestyle="-")
+    draw_crack_segments(ax, cracks, color=color, linewidth=linewidth)
     ax.set_ylim(frame.shape[0], 0)
     ax.set_xlim(0, frame.shape[1])
     ax.set_aspect("equal")
@@ -901,9 +764,6 @@ def _theta_from_ply(ply: Ply) -> int:
 __all__ = [
     "crack_eval",
     "crack_analysis",
-    "crack_eval_by_orientation",
-    "crack_eval_crossply",
-    "crack_eval_plus_minus",
     "plot_cracks",
     "order_cracks",
     "crack_grouping",

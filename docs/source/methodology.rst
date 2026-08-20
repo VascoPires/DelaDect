@@ -200,15 +200,20 @@ Edge primary parameters (``detect_primary(params=...)``)
 - ``window_edge=(0, 60)``
 - ``threshold_strategy="kmeans"``
 - ``gaussian_filters=(0.5, 15.0)``
-- ``scale_min=150.0``
-- ``scale_max=255.0``
+- ``scale_min=None``, ``scale_max=None`` (percentile-based scaling is the
+  default; set both explicitly to switch to fixed-bound scaling)
 - ``seed_ratio=0.01``
 - ``connectivity_mode="directional"`` (also supports strict ``"columnwise"``;
   the former ``"legacy_flood"`` mode was removed)
 - ``directional_lateral_drift_px=None``
 - ``directional_lateral_drift_scale=0.25``
 - ``hard_floor=0.90`` (normalized gate on smoothed image; tweak per specimen)
-- ``post_threshold_closing_scale=2.5``
+- ``post_threshold_closing_px=4`` (pixel-radius closing; this is the active
+  default -- takes precedence over ``post_threshold_closing_scale`` whenever set)
+- ``post_threshold_closing_scale=None`` (optional size-relative closing,
+  scaled by ``avg_crack_width_px``; only used when ``post_threshold_closing_px``,
+  ``post_threshold_closing_radius``, and ``pre_threshold_closing_radius`` are
+  all ``None``)
 - ``post_threshold_closing_radius`` (optional explicit override; ``0`` disables closing)
 - ``pre_threshold_closing_radius`` (legacy alias for explicit closing radius)
 - ``min_object_px=0`` (remove small connected components after closing)
@@ -225,7 +230,11 @@ Diffuse parameters (``detector.diffuse.diffuse_delamination(params=...)``)
 - ``scale_min_percentile=10.0``, ``scale_max_percentile=99.0``
   (when both are set, per-ROI percentiles override fixed bounds)
 - ``hard_floor=0.90`` (normalized gate on diffuse-smoothed ROI; tweak per specimen)
-- ``post_threshold_closing_scale=2.5``
+- ``post_threshold_closing_px=4`` (pixel-radius closing; this is the active
+  default -- takes precedence over ``post_threshold_closing_scale`` whenever set)
+- ``post_threshold_closing_scale=None`` (optional size-relative closing,
+  scaled by ``avg_crack_width_px``; only used when ``post_threshold_closing_px``
+  is ``None``)
 
 For a lagged single-frame rolling reference, use preprocessing
 ``reference_mode="rolling_median"`` with ``reference_window=1`` and tune
@@ -237,7 +246,8 @@ If diffuse masks look too broad (for example rectangular ROI-like masks), tune
 in this order:
 
 1. increase preprocessing ``reference_skip`` (start with ``1`` or ``2``)
-2. reduce ``post_threshold_closing_scale`` (for example ``2.5 -> 1.0``)
+2. reduce ``post_threshold_closing_px`` (for example ``4 -> 2``); it's the
+   active default and takes precedence over ``post_threshold_closing_scale``
 3. tighten ROI geometry (``diffuse_dx``, ``diffuse_dy``)
 4. retune ``window_diffuse`` and threshold sampling controls
 

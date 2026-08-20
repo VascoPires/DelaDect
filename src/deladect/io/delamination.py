@@ -34,6 +34,30 @@ def save_interface_metrics(metrics: pd.DataFrame, path: Path) -> Path:
     return target
 
 
+def _store_masks_field(
+    interface: Interface,
+    *,
+    masks: Optional[Dict[str, np.ndarray]],
+    path: Optional[Path],
+    metadata_key: str,
+    label: str,
+) -> None:
+    """Save one masks/path field and record it in ``interface.metadata``.
+
+    Shared by ``store_interface_masks`` and
+    ``store_interface_delamination_results``: if ``masks`` are given, persist
+    them to ``path`` (required in that case) and record the saved path;
+    otherwise, if a bare ``path`` was given, just record it as-is.
+    """
+    if masks is not None:
+        if path is None:
+            raise ValueError(f"{label}_path must be provided when {label}_masks are supplied.")
+        saved = save_npz_bundle(masks, path)
+        interface.metadata[metadata_key] = str(saved)
+    elif path is not None:
+        interface.metadata[metadata_key] = str(Path(path))
+
+
 def store_interface_masks(
     interface: Interface,
     *,
@@ -43,21 +67,14 @@ def store_interface_masks(
     secondary_path: Optional[Path] = None,
 ) -> None:
     """Persist interface primary/secondary masks and update metadata paths."""
-    if primary_masks is not None:
-        if primary_path is None:
-            raise ValueError("primary_path must be provided when primary_masks are supplied.")
-        saved_primary = save_npz_bundle(primary_masks, primary_path)
-        interface.metadata[INTERFACE_PRIMARY_MASKS_KEY] = str(saved_primary)
-    elif primary_path is not None:
-        interface.metadata[INTERFACE_PRIMARY_MASKS_KEY] = str(Path(primary_path))
-
-    if secondary_masks is not None:
-        if secondary_path is None:
-            raise ValueError("secondary_path must be provided when secondary_masks are supplied.")
-        saved_secondary = save_npz_bundle(secondary_masks, secondary_path)
-        interface.metadata[INTERFACE_SECONDARY_MASKS_KEY] = str(saved_secondary)
-    elif secondary_path is not None:
-        interface.metadata[INTERFACE_SECONDARY_MASKS_KEY] = str(Path(secondary_path))
+    _store_masks_field(
+        interface, masks=primary_masks, path=primary_path,
+        metadata_key=INTERFACE_PRIMARY_MASKS_KEY, label="primary",
+    )
+    _store_masks_field(
+        interface, masks=secondary_masks, path=secondary_path,
+        metadata_key=INTERFACE_SECONDARY_MASKS_KEY, label="secondary",
+    )
 
 
 def store_interface_delamination_results(
@@ -72,29 +89,18 @@ def store_interface_delamination_results(
     metrics_path: Optional[Path] = None,
 ) -> None:
     """Persist diffuse/combined outputs and record paths in interface metadata."""
-    if diffuse_raw_masks is not None:
-        if diffuse_raw_path is None:
-            raise ValueError("diffuse_raw_path must be provided when diffuse_raw_masks are supplied.")
-        saved_raw = save_npz_bundle(diffuse_raw_masks, diffuse_raw_path)
-        interface.metadata[INTERFACE_DIFFUSE_RAW_MASKS_KEY] = str(saved_raw)
-    elif diffuse_raw_path is not None:
-        interface.metadata[INTERFACE_DIFFUSE_RAW_MASKS_KEY] = str(Path(diffuse_raw_path))
-
-    if diffuse_masks is not None:
-        if diffuse_path is None:
-            raise ValueError("diffuse_path must be provided when diffuse_masks are supplied.")
-        saved_diffuse = save_npz_bundle(diffuse_masks, diffuse_path)
-        interface.metadata[INTERFACE_DIFFUSE_MASKS_KEY] = str(saved_diffuse)
-    elif diffuse_path is not None:
-        interface.metadata[INTERFACE_DIFFUSE_MASKS_KEY] = str(Path(diffuse_path))
-
-    if combined_masks is not None:
-        if combined_path is None:
-            raise ValueError("combined_path must be provided when combined_masks are supplied.")
-        saved_combined = save_npz_bundle(combined_masks, combined_path)
-        interface.metadata[INTERFACE_COMBINED_MASKS_KEY] = str(saved_combined)
-    elif combined_path is not None:
-        interface.metadata[INTERFACE_COMBINED_MASKS_KEY] = str(Path(combined_path))
+    _store_masks_field(
+        interface, masks=diffuse_raw_masks, path=diffuse_raw_path,
+        metadata_key=INTERFACE_DIFFUSE_RAW_MASKS_KEY, label="diffuse_raw",
+    )
+    _store_masks_field(
+        interface, masks=diffuse_masks, path=diffuse_path,
+        metadata_key=INTERFACE_DIFFUSE_MASKS_KEY, label="diffuse",
+    )
+    _store_masks_field(
+        interface, masks=combined_masks, path=combined_path,
+        metadata_key=INTERFACE_COMBINED_MASKS_KEY, label="combined",
+    )
 
     if metrics_path is not None:
         interface.metadata[INTERFACE_METRICS_KEY] = str(Path(metrics_path))

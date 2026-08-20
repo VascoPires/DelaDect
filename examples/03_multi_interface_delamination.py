@@ -31,8 +31,8 @@ def main() -> None:
     for index in range(2):
         specimen.add_interface(
             name=f"i{index}",
-            upper_ply_index=index,
-            lower_ply_index=index + 1,
+            upper_ply=index,
+            lower_ply=index + 1,
         )
 
     detector = DelaminationDetector(

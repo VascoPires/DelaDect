@@ -20,24 +20,24 @@ def main() -> None:
         sorting_key="_sc",
         image_types=["png"],
         results_root=str(RESULTS_ROOT),
-        avg_crack_width_px=14.0,
+        avg_crack_width_px=8.0,
     )
     ply0 = specimen.add_ply(
         name="ply_0",
         orientation_deg=0.0,
-        avg_crack_width_px=14.0,
+        avg_crack_width_px=8.0,
         min_crack_length_px=90.0,
     )
     ply90 = specimen.add_ply(
         name="ply_90",
         orientation_deg=90.0,
-        avg_crack_width_px=14.0,
+        avg_crack_width_px=8.0,
         min_crack_length_px=90.0,
     )
     interface = specimen.add_interface(
         name="i0",
-        upper_ply_index=ply0,
-        lower_ply_index=ply90,
+        upper_ply=ply0,
+        lower_ply=ply90,
     )
 
     crack_results = crack_analysis(
