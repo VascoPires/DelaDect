@@ -1,5 +1,5 @@
-Results Storage
-================
+How to store results
+=====================
 
 Overview
 --------

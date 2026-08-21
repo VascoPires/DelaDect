@@ -1,6 +1,6 @@
 from deladect.detection import DelaminationDetector
 
-# creates the interface object for the delamination detection
+# creates a interface object for delamination detection
 # the specimen s is already defined in Section 3.1
 interface = s.add_interface(name="i0", lower_ply=ply0, upper_ply=ply90)
 

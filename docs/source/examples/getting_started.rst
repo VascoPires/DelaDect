@@ -145,9 +145,9 @@ The outputs of the crack and delamination detection with the referred parameters
    :align: center
 
 
-This minimal example shows how to use DelaDect for a complete analysis of a specimen. To go further and
-take full advantage of the tool's available methods and parameters, continue with
-:doc:`advanced_options`.
+This minimal example shows how to use DelaDect for a complete analysis of a specimen. To go further,
+continue with :doc:`delamination_multi_interface` for hierarchical multi-interface edge delamination,
+or :doc:`save_reload_results` for persisting and reloading a specimen's results.
 
 
 Using the full frame stack

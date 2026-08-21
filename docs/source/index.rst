@@ -78,7 +78,6 @@ You can access it at
    :hidden:
 
    examples/getting_started
-   examples/advanced_options
    examples/delamination_multi_interface
    examples/save_reload_results
 
@@ -88,12 +87,11 @@ You can access it at
    :hidden:
 
    shift_correction
-   image_handling
    Image_pre_processing
-   image_operations
    methodology
    edge_delamination
    diffuse_delamination
+   image_operations
    results_storage
 
 .. toctree::
@@ -103,6 +101,7 @@ You can access it at
 
    detection
    delamination
+   image_handling
 
 .. toctree::
    :maxdepth: 1

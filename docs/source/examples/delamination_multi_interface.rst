@@ -1,32 +1,94 @@
-03 - Multi-Interface Edge Delamination
+02 - Multi-Interface Edge Delamination
 ======================================
 
-Goal
-----
+This example shows edge delamination on its own: first on a single interface,
+then across two interfaces with hierarchical promotion. It is an edge-only
+workflow -- no crack detection and no diffuse delamination are involved.
 
-Distinguish primary edge delamination at ``i0`` from a later promoted region at
-the deeper ``i1`` interface. This is an edge-only workflow; it does not require
-crack detection.
+A `Binder <https://mybinder.org/v2/gh/vascodcpires/deladect/main?labpath=notebooks/multi_interface_edge_delamination.ipynb>`_
+notebook that serves as a companion to this example is available in the
+repository and can be run without installation.
 
-The example is useful with two interfaces. The included sample validates a
-primary and one secondary level, but it does not justify a third interface.
+Building the specimen
+----------------------
 
-Run it
-------
+Multi-interface promotion needs at least two interfaces, so this specimen has
+three plies (``[0, 90, 0]``) and two interfaces: ``i0`` between the first two
+plies, and ``i1`` between the last two. ``i0`` is the primary interface;
+``i1`` is the deeper interface that can be *promoted* once evidence of
+delamination persists beneath it. Crack detection isn't needed for this
+workflow, so no ply-level crack parameters are set beyond the defaults.
+
+.. code-block:: python
+
+   from pathlib import Path
+
+   from deladect.detection import DelaminationDetector
+   from deladect.io import save_specimen
+   from deladect.io.delamination import save_mask_bundle
+   from deladect.specimen import Specimen
+
+   specimen = Specimen(
+       name="02-multi-interface-edge",
+       scale_px_mm=41.03328366,
+       path_full=str(data_root),
+       sorting_key="_sc",
+       image_types=["png"],
+       avg_crack_width_px=8.0,
+   )
+   for index, orientation in enumerate((0.0, 90.0, 0.0)):
+       specimen.add_ply(
+           name=f"ply_{index}",
+           orientation_deg=orientation,
+           avg_crack_width_px=8.0,
+           min_crack_length_px=20.0,
+       )
+   for index in range(2):
+       specimen.add_interface(name=f"i{index}", upper_ply=index, lower_ply=index + 1)
+
+   detector = DelaminationDetector(specimen, specimen.interfaces[0], save_preprocess_outputs=True)
+
+The script uses the ten frames in ``example_images/sample-3`` and writes below
+``results/02-multi-interface-edge``:
 
 .. code-block:: bash
 
-   python examples/03_multi_interface_delamination.py
+   python examples/02_multi_interface_edge_delamination.py
 
-The script uses the ten frames in ``example_images/sample-4`` and writes below
-``results/03-multi-interface``.
+1. Standalone edge delamination
+--------------------------------
 
-Why two preprocessing caches are used
--------------------------------------
+:meth:`~deladect.detection.delamination.EdgeDetector.detect_primary` runs
+entirely on its own -- no crack catalogue, no diffuse pipeline, and no second
+interface required. This is the same edge algorithm used inside
+``detect_both_delaminations``, just called directly on ``i0``.
 
-The primary edge mask is accumulated against a static reference. A separate
-rolling-median cache highlights changes inside the established primary region
-and drives promotion to ``i1``.
+.. code-block:: python
+
+   primary_only = detector.edge.detect_primary(
+       save_overlays=True,
+       overlay_dirname="edge_only",
+       params={"window_edge": (1, 60), "seed_ratio": 0.01},
+   )
+   primary_only_masks_path = save_mask_bundle(
+       primary_only["masks"],
+       specimen.results_dir("edge_only", "edge", "masks") / "primary.npz",
+   )
+
+``detect_primary`` doesn't save masks by itself (only overlays, when
+requested); the snippet above saves the returned masks explicitly with
+``save_mask_bundle`` so they persist alongside the overlays.
+
+2. Multi-interface promotion
+------------------------------
+
+:meth:`~deladect.detection.delamination.EdgeDetector.detect_edge_multi` adds
+hierarchical promotion to a deeper interface. It needs two separate
+preprocessing caches: a *static*-reference cache drives the primary
+accumulation at ``i0``, while a *rolling-median*-reference cache drives the
+promotion check at ``i1`` -- it must stay sensitive to change happening
+inside a region already flagged as damaged, which a static reference would no
+longer highlight.
 
 .. code-block:: python
 
@@ -35,7 +97,6 @@ and drives promotion to ``i1``.
        key="primary_static",
        reference_mode="static",
    )["cache_paths"]
-
    secondary_cache = detector.preprocess_stack_to_disk(
        specimen.image_stack_full,
        key="secondary_rolling",
@@ -44,27 +105,88 @@ and drives promotion to ``i1``.
        reference_skip=2,
    )["cache_paths"]
 
-   result = detector.edge.detect_edge_multi(
+   multi_result = detector.edge.detect_edge_multi(
        interfaces=specimen.interfaces,
        processed_cache_paths=primary_cache,
        secondary_cache_paths=secondary_cache,
        save_masks=True,
        save_overlays=True,
+       primary_params={"window_edge": (1, 60), "seed_ratio": 0.01},
+       secondary_params={"secondary_similarity_threshold": 0.6},
    )
 
+   manifest = specimen.results_dir("config") / "specimen.json"
+   save_specimen(specimen, manifest)
+
+For the full promotion mechanics -- how a candidate becomes promoted, and
+what each parameter in ``secondary_params`` actually does -- see
+:doc:`../edge_delamination`.
+
 Observed result
----------------
-
-On the included frames, ``i0`` begins in the third sampled frame and grows to
-1,997,433 pixels. ``i1`` appears in the final sampled frame with 284,227 pixels.
-These values are useful smoke-test expectations, not universal thresholds.
-
-Inspect ``results/03-multi-interface/delamination/edge_multi/overlays`` and the
-inclusive/exclusive bundles in the adjacent ``masks`` directory.
-
-Input limitation
 ----------------
 
-This method currently requires a full-height stack (or full-height preprocessed
-frames). Explicit upper, middle, and lower region stacks are not supported by
-the multi-interface path.
+.. figure:: ../_static/examples/multi_interface_detection_outputs.png
+   :alt: Standalone single-interface edge delamination compared with multi-interface promotion, frame 272
+   :width: 100%
+   :align: center
+
+   **(a)** Standalone ``detect_primary`` on ``i0`` alone. **(b)** The same
+   frame from ``detect_edge_multi``: ``i0`` unchanged, plus ``i1`` promoted
+   wherever the rolling-median pass found further change inside the settled
+   ``i0`` region.
+
+``i0`` begins growing from the third sampled frame onward and reaches
+1,997,433 pixels by the final frame. ``i1`` stays at zero until the final
+sampled frame, where it appears with 284,227 pixels -- visible as the blue
+regions in panel (b) above, concentrated near the top and bottom edges rather
+than spread along ``i0``'s full length.
+
+.. figure:: ../_static/examples/multi_interface_area_plot.png
+   :alt: Detected area in pixels for i0 and i1 plotted against frame number
+   :width: 70%
+   :align: center
+
+   Detected area per interface across the sampled frames. ``i1`` only
+   registers non-zero area once promotion condition is met in the last frame;
+   these values are useful smoke-test expectations for this dataset, not
+   universal thresholds.
+
+Inspect ``results/02-multi-interface-edge/delamination/edge_multi/overlays``
+and the inclusive/exclusive bundles in the adjacent ``masks`` directory. The
+single-interface run from step 1 is written separately, under
+``results/02-multi-interface-edge/edge_only/edge``.
+
+Cracks and delamination together, in 3D
+-----------------------------------------
+
+The scene below is a **different specimen** from the rest of this page: a
+three-ply ``[90, -30, 30]`` plus/minus/transverse laminate, rather than
+sample-3's edge-only ``[0, 90, 0]`` workflow. It's included here because
+sample-3 never runs crack detection, so it can't show cracks and
+delamination together -- this laminate has both, at its last analyzed
+frame. Each ply is drawn at an intentionally exaggerated 8 mm thickness with
+a 30 mm gap (real plies are much thinner) so the three layers stay visually
+distinct; the dark prisms are individual cracks and the translucent
+red/blue planes are the primary/secondary delamination masks.
+
+.. raw:: html
+
+   <iframe src="../_static/examples/full_laminate_3d_view.html"
+           width="100%" height="520" style="border: 1px solid #ccc; border-radius: 4px;"
+           loading="lazy">
+   </iframe>
+
+Drag to rotate, scroll to zoom. This is a self-contained ``vtk.js`` export
+(the same mechanism PyVista's own documentation uses for its interactive
+examples: ``Plotter.export_html()`` serializes the actual VTK scene to run
+natively in the browser, so transparency and lighting carry over correctly).
+There is no PyVista -- or any other 3D library -- dependency anywhere in
+DelaDect itself; the scene was generated once, offline, and only the
+resulting static HTML file is shipped with the docs.
+
+Input limitation
+------------------
+
+Multi-interface promotion currently requires a full-height stack (or
+full-height preprocessed frames). Explicit upper, middle, and lower region
+stacks, as used in :doc:`getting_started`, are not supported by this path.
