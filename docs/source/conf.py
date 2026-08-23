@@ -37,11 +37,29 @@ exclude_patterns = []
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = 'sphinx_rtd_theme'
+html_theme = 'sphinx_book_theme'
+html_title = project
 html_static_path = ['_static']
 html_logo = 'deladect_logo.svg'
+html_show_sourcelink = False
+html_copy_source = False
+
+# Repository metadata powers the theme's "Edit this page" links.
+html_context = {
+    'github_user': 'VascoPires',
+    'github_repo': 'DelaDect',
+    'github_version': 'main',
+    'doc_path': 'docs/source',
+}
+
 html_theme_options = {
-    'logo_only': True
+    'github_url': 'https://github.com/VascoPires/DelaDect',
+    'collapse_navigation': True,
+    'use_edit_page_button': True,
+    'navigation_with_keys': False,
+    'show_navbar_depth': 1,
+    'max_navbar_depth': 4,
+    'show_prev_next': False,
 }
 
 

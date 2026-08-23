@@ -48,7 +48,15 @@ def main() -> None:
     primary_only = detector.edge.detect_primary(
         save_overlays=True,
         overlay_dirname="edge_only",
-        params={"window_edge": (1, 60), "seed_ratio": 0.01},
+        params={
+            "window_edge": (1, 130),
+            "gaussian_filters": (0.5, 15.0),
+            "hard_floor": 0.90,
+            "scale_min_percentile": 10,
+            "scale_max_percentile": 95,
+            "seed_ratio": 0.01,
+            "post_threshold_closing_px": 20,
+        },
     )
     primary_only_masks_path = save_mask_bundle(
         primary_only["masks"],
@@ -80,8 +88,31 @@ def main() -> None:
         secondary_cache_paths=secondary_cache,
         save_masks=True,
         save_overlays=True,
-        primary_params={"window_edge": (1, 60), "seed_ratio": 0.01},
-        secondary_params={"secondary_similarity_threshold": 0.6},
+        primary_params={
+            "window_edge": (1, 130),
+            "gaussian_filters": (0.5, 15.0),
+            "hard_floor": 0.90,
+            "scale_min_percentile": 10,
+            "scale_max_percentile": 95,
+            "seed_ratio": 0.01,
+            "post_threshold_closing_px": 20,
+        },
+        secondary_edge_params={
+            "window_edge": (1, 30),
+            "gaussian_filters": (0.5, 15.0),
+            "hard_floor": 0.90,
+            "scale_min_percentile": 10,
+            "scale_max_percentile": 95,
+            "seed_ratio": 0.01,
+            "post_threshold_closing_px": 10,
+        },
+        secondary_params={
+            "secondary_similarity_threshold": 0.80,
+            "min_primary_frac_for_secondary": 0.10,
+            # Position 2 in the sampled stack == frame 195, the closest sample-3
+            # frame to Out30-p1's secondary_start_frame_id=181 in its own numbering.
+            "secondary_start_frame": 2,
+        },
     )
 
     manifest = specimen.results_dir("config") / "specimen.json"

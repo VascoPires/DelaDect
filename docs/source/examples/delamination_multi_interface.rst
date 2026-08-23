@@ -68,7 +68,15 @@ interface required. This is the same edge algorithm used inside
    primary_only = detector.edge.detect_primary(
        save_overlays=True,
        overlay_dirname="edge_only",
-       params={"window_edge": (1, 60), "seed_ratio": 0.01},
+       params={
+           "window_edge": (1, 130),
+           "gaussian_filters": (0.5, 15.0),
+           "hard_floor": 0.90,
+           "scale_min_percentile": 10,
+           "scale_max_percentile": 95,
+           "seed_ratio": 0.01,
+           "post_threshold_closing_px": 20,
+       },
    )
    primary_only_masks_path = save_mask_bundle(
        primary_only["masks"],
@@ -111,8 +119,29 @@ longer highlight.
        secondary_cache_paths=secondary_cache,
        save_masks=True,
        save_overlays=True,
-       primary_params={"window_edge": (1, 60), "seed_ratio": 0.01},
-       secondary_params={"secondary_similarity_threshold": 0.6},
+       primary_params={
+           "window_edge": (1, 130),
+           "gaussian_filters": (0.5, 15.0),
+           "hard_floor": 0.90,
+           "scale_min_percentile": 10,
+           "scale_max_percentile": 95,
+           "seed_ratio": 0.01,
+           "post_threshold_closing_px": 20,
+       },
+       secondary_edge_params={
+           "window_edge": (1, 30),
+           "gaussian_filters": (0.5, 15.0),
+           "hard_floor": 0.90,
+           "scale_min_percentile": 10,
+           "scale_max_percentile": 95,
+           "seed_ratio": 0.01,
+           "post_threshold_closing_px": 10,
+       },
+       secondary_params={
+           "secondary_similarity_threshold": 0.80,
+           "min_primary_frac_for_secondary": 0.10,
+           "secondary_start_frame": 2,  # frame 195, closest sample-3 frame to id 181
+       },
    )
 
    manifest = specimen.results_dir("config") / "specimen.json"
@@ -136,8 +165,8 @@ Observed result
    ``i0`` region.
 
 ``i0`` begins growing from the third sampled frame onward and reaches
-1,997,433 pixels by the final frame. ``i1`` stays at zero until the final
-sampled frame, where it appears with 284,227 pixels -- visible as the blue
+2,015,119 pixels by the final frame. ``i1`` stays at zero until the final
+sampled frame, where it appears with 318,015 pixels -- visible as the blue
 regions in panel (b) above, concentrated near the top and bottom edges rather
 than spread along ``i0``'s full length.
 
@@ -183,6 +212,53 @@ natively in the browser, so transparency and lighting carry over correctly).
 There is no PyVista -- or any other 3D library -- dependency anywhere in
 DelaDect itself; the scene was generated once, offline, and only the
 resulting static HTML file is shipped with the docs.
+
+Sample-3 itself, in 3D
+------------------------
+
+Unlike the illustrative laminate above, this scene is result-backed: it's
+specimen ``Out30-p1`` at frame 217, rendered directly from the crack and
+interface-mask artefacts this page's ``detect_edge_multi`` walkthrough
+produced -- real ply geometry, real detected cracks, real delamination
+masks, no exaggeration.
+
+.. raw:: html
+
+   <label style="display: inline-flex; align-items: center; gap: 0.4em; margin-bottom: 0.5em;">
+     <input type="checkbox" id="sample3-3d-cracks-toggle">
+     Show cracks
+   </label>
+   <div style="position: relative; width: 100%; height: 520px;">
+     <iframe id="sample3-3d-with-cracks" src="../_static/examples/Out30-p1_3d_view.html"
+             width="100%" height="520"
+             style="position: absolute; top: 0; left: 0; border: 1px solid #ccc; border-radius: 4px; visibility: hidden;"
+             loading="lazy">
+     </iframe>
+     <iframe id="sample3-3d-no-cracks" src="../_static/examples/Out30-p1_3d_view_no_cracks.html"
+             width="100%" height="520"
+             style="position: absolute; top: 0; left: 0; border: 1px solid #ccc; border-radius: 4px;"
+             loading="lazy">
+     </iframe>
+   </div>
+   <script>
+     document.getElementById("sample3-3d-cracks-toggle").addEventListener("change", function (event) {
+       var withCracks = document.getElementById("sample3-3d-with-cracks");
+       var noCracks = document.getElementById("sample3-3d-no-cracks");
+       if (event.target.checked) {
+         withCracks.style.visibility = "visible";
+         noCracks.style.visibility = "hidden";
+       } else {
+         withCracks.style.visibility = "hidden";
+         noCracks.style.visibility = "visible";
+       }
+     });
+   </script>
+
+Drag to rotate, scroll to zoom. Same ``Plotter.export_html()`` mechanism as
+above, rendered with a white background to match the docs page. Both crack
+states are pre-rendered from the same camera angle and swapped client-side,
+so toggling is instant; rotating one view and then flipping the checkbox
+resets to that shared starting angle rather than carrying your rotation over.
 
 Input limitation
 ------------------

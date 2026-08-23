@@ -4,8 +4,8 @@ Language-specific code block styling
 - Python blocks -> black text on light green background
 - Bash/shell/console blocks -> black text on light yellow background
 
-This targets both the outer wrapper and inner pygments nodes used by
-sphinx_rtd_theme.
+This targets the standard Sphinx/Pygments wrappers used by
+sphinx-book-theme while remaining independent of the page layout.
 */
 
 :root {
@@ -15,45 +15,45 @@ sphinx_rtd_theme.
 }
 
 /* Python */
-.rst-content div.highlight-python,
-.rst-content div.highlight-python3,
-.rst-content div.highlight-python .highlight,
-.rst-content div.highlight-python3 .highlight,
-.rst-content div.highlight-python pre,
-.rst-content div.highlight-python3 pre {
+div.highlight-python,
+div.highlight-python3,
+div.highlight-python .highlight,
+div.highlight-python3 .highlight,
+div.highlight-python pre,
+div.highlight-python3 pre {
   background: var(--deladect-python-bg) !important;
 }
 
-.rst-content div.highlight-python pre,
-.rst-content div.highlight-python3 pre,
-.rst-content div.highlight-python pre *,
-.rst-content div.highlight-python3 pre * {
+div.highlight-python pre,
+div.highlight-python3 pre,
+div.highlight-python pre *,
+div.highlight-python3 pre * {
   color: var(--deladect-code-fg) !important;
 }
 
 /* Bash / shell / console */
-.rst-content div.highlight-bash,
-.rst-content div.highlight-shell,
-.rst-content div.highlight-console,
-.rst-content div.highlight-sh,
-.rst-content div.highlight-bash .highlight,
-.rst-content div.highlight-shell .highlight,
-.rst-content div.highlight-console .highlight,
-.rst-content div.highlight-sh .highlight,
-.rst-content div.highlight-bash pre,
-.rst-content div.highlight-shell pre,
-.rst-content div.highlight-console pre,
-.rst-content div.highlight-sh pre {
+div.highlight-bash,
+div.highlight-shell,
+div.highlight-console,
+div.highlight-sh,
+div.highlight-bash .highlight,
+div.highlight-shell .highlight,
+div.highlight-console .highlight,
+div.highlight-sh .highlight,
+div.highlight-bash pre,
+div.highlight-shell pre,
+div.highlight-console pre,
+div.highlight-sh pre {
   background: var(--deladect-shell-bg) !important;
 }
 
-.rst-content div.highlight-bash pre,
-.rst-content div.highlight-shell pre,
-.rst-content div.highlight-console pre,
-.rst-content div.highlight-sh pre,
-.rst-content div.highlight-bash pre *,
-.rst-content div.highlight-shell pre *,
-.rst-content div.highlight-console pre *,
-.rst-content div.highlight-sh pre * {
+div.highlight-bash pre,
+div.highlight-shell pre,
+div.highlight-console pre,
+div.highlight-sh pre,
+div.highlight-bash pre *,
+div.highlight-shell pre *,
+div.highlight-console pre *,
+div.highlight-sh pre * {
   color: var(--deladect-code-fg) !important;
 }
