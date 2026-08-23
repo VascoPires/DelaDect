@@ -204,7 +204,7 @@ def _reference_settings_from_cache_paths(
     }
 
 
-def _prepare_preprocess_figure(image_shape: Optional[Tuple[int, int]]):
+def _prepare_preprocess_figure(image_shape: Optional[Tuple[int, int]], reference_mode: str = "rolling_median"):
     """Create reusable matplotlib artists for preprocess triplet previews."""
     import matplotlib.pyplot as plt
 
@@ -220,10 +220,11 @@ def _prepare_preprocess_figure(image_shape: Optional[Tuple[int, int]]):
     fig, axes = plt.subplots(1, 3, figsize=figsize, dpi=_DPI, constrained_layout=True)
     axes = list(axes)
 
+    baseline_title = "Rolling median baseline" if reference_mode == "rolling_median" else "Static baseline"
     im_raw = axes[0].imshow(np.zeros(placeholder_shape), cmap="gray", vmin=0, vmax=255, aspect="equal")
     axes[0].set_title("Raw")
     im_base = axes[1].imshow(np.zeros(placeholder_shape), cmap="gray", vmin=0.0, vmax=1.0, aspect="equal")
-    axes[1].set_title("Rolling median baseline")
+    axes[1].set_title(baseline_title)
     im_proc = axes[2].imshow(np.zeros(placeholder_shape), cmap="gray", vmin=0, vmax=255, aspect="equal")
     axes[2].set_title("Processed")
     for ax in axes:
@@ -356,7 +357,7 @@ class PreprocessingMixin:
         if output_dir is not None:
             output_dir.mkdir(parents=True, exist_ok=True)
             image_shape = raw_stack[0].shape if raw_stack else None
-            plot_state = _prepare_preprocess_figure(image_shape)
+            plot_state = _prepare_preprocess_figure(image_shape, reference_mode=reference_mode)
 
         reference_window = max(1, int(reference_window))
         reference_skip = max(0, int(reference_skip))
@@ -607,7 +608,7 @@ class PreprocessingMixin:
             cache_paths.append(cache_path)
 
             if output_dir is not None and plot_state is None:
-                plot_state = _prepare_preprocess_figure(raw.shape)
+                plot_state = _prepare_preprocess_figure(raw.shape, reference_mode=reference_mode)
             self._maybe_save_preprocess_plot(
                 plot_state=plot_state,
                 output_dir=output_dir,

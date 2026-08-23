@@ -151,6 +151,34 @@ For the full promotion mechanics -- how a candidate becomes promoted, and
 what each parameter in ``secondary_params`` actually does -- see
 :doc:`../edge_delamination`.
 
+Static vs. rolling-median preprocessing
+"""""""""""""""""""""""""""""""""""""""
+
+The figure below compares both caches at the same frame (the last sampled
+frame, where they have diverged the most): the *baseline* each reference
+mode computes, and the resulting *processed* frame.
+
+.. figure:: ../_static/examples/static_vs_rolling_median_preprocessing.png
+   :alt: Static vs rolling-median reference preprocessing compared on the same frame of Sample-3
+   :width: 100%
+   :align: center
+
+   Sample-3, frame 9. **Top row:** the static baseline is fixed to an early
+   reference frame, so it never absorbs the delamination front; the processed
+   frame shows it as one strong, high-contrast band. **Bottom row:** the
+   rolling-median baseline (window=7, skip=2) tracks recent frames, so it
+   partially absorbs the already-established front into the baseline itself
+   -- the processed band is fainter and narrower, but the reference stays
+   sensitive to *new* change happening on top of it.
+
+This is exactly why the two caches are used for different roles above: the
+static cache accumulates ``i0``'s primary damage without ever "forgetting"
+it, while the rolling-median cache is what lets ``detect_edge_multi`` notice
+further change *inside* an already-flagged ``i0`` region and promote it to
+``i1``. Using a rolling-median cache for the primary accumulation instead
+would risk the opposite problem: established delamination could fade back
+into the baseline over time and disappear from the processed signal.
+
 Observed result
 ----------------
 
