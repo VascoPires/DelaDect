@@ -13,7 +13,7 @@ sys.path.insert(0, str(REPO_ROOT / 'src'))
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'DelaDect'
-copyright = '2025, Vasco D. C. Pires'
+copyright = '2026, Vasco D. C. Pires'
 author = 'Vasco D. C. Pires'
 
 # -- General configuration ---------------------------------------------------

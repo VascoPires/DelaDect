@@ -6,20 +6,20 @@ the specimen had a single interface where delamination detection was performed. 
 DelaDect also offers the possibility to perform delamination detection across multiple interfaces.
 
 This functionality is only available for edge delamination detection for specimens such as the one
-shown in Sample-3 from the examples provided. Since from a single image we only obtain a distribution 
-of intensity, it is not possible to distinguish between delamination at different interfaces. However, 
-if we have a sequence of images, it is possible to detect delamination at one interface and then 
-if aditional delamination is detected in the same region in subsequent images, we can detect
-delamintion on a different layer. Of course, this approach is built on the assumption that any
-aditional darkening in the same region is due to delamination at a different interface. Also, this approach
-is only valid when delamination shows up sequentually during a mechanichal test and one of the interfaces
-is dominant in the initial stages. This is often the case for laminates such as $[\pm \theta /90^\circ]_s$.
+shown in Sample-3 from the examples provided. Since from a single image we only obtain a distribution
+of intensity, it is not possible to distinguish between delamination at different interfaces. However,
+if we have a sequence of images, it is possible to detect delamination at one interface and then
+if additional delamination is detected in the same region in subsequent images, we can detect
+delamination on a different layer. Of course, this approach is built on the assumption that any
+additional darkening in the same region is due to delamination at a different interface. Also, this approach
+is only valid when delamination shows up sequentially during a mechanical test and one of the interfaces
+is dominant in the initial stages. This is often the case for laminates such as :math:`[\pm \theta /90^\circ]_s`.
 
-This example is divided into three parts. The first part show how to perform different normalization 
+This example is divided into three parts. The first part shows how different normalization
 of the images in a sequence can be performed, here we will see the differences between using the static
 reference and the rolling median reference. The second part shows how to perform delamination detection
 on a single interface. Finally, the third part shows how to perform delamination detection on multiple
-interfaces. 
+interfaces.
 
 A `Binder <https://mybinder.org/v2/gh/vascodcpires/deladect/main?labpath=notebooks/multi_interface_edge_delamination.ipynb>`_
 notebook that serves as a companion to this example is available in the
@@ -30,9 +30,9 @@ Building the specimen
 
 Multi-interface promotion needs at least two interfaces, so this specimen has
 three ply directions: 90, -30, 30 (symmetric) and two interfaces: ``90/-30`` between the first two
-plies, and ``-30/30`` between the last two. ``90/-30`` is what we call primary interface, since it
-is the first interface to show delamination, while ``-30/30`` is the secondary interface. 
-As seen before for the getting started example [add here the link], the specimen can be built by:
+plies, and ``-30/30`` between the last two. ``90/-30`` is what we call the primary interface, since it
+is the first interface to show delamination, while ``-30/30`` is the secondary interface.
+As seen before for the :doc:`getting started <getting_started>` example, the specimen can be built by:
 
 .. code-block:: python
 
@@ -51,13 +51,24 @@ As seen before for the getting started example [add here the link], the specimen
        image_types=["png"],
        avg_crack_width_px=8.0,
    )
-   for index, orientation in enumerate((90.0, -30.0, 30.0)):
-       specimen.add_ply(
-           name=f"ply_{index}",
-           orientation_deg=orientation,
-           avg_crack_width_px=8.0,
-           min_crack_length_px=20.0,
-       )
+   specimen.add_ply(
+       name="ply_0",
+       orientation_deg=90.0,
+       avg_crack_width_px=8.0,
+       min_crack_length_px=20.0,
+   )
+   specimen.add_ply(
+       name="ply_1",
+       orientation_deg=-30.0,
+       avg_crack_width_px=8.0,
+       min_crack_length_px=20.0,
+   )
+   specimen.add_ply(
+       name="ply_2",
+       orientation_deg=30.0,
+       avg_crack_width_px=8.0,
+       min_crack_length_px=20.0,
+   )
    specimen.add_interface(name="90/-30", upper_ply=0, lower_ply=1)
    specimen.add_interface(name="-30/30", upper_ply=1, lower_ply=2)
 
@@ -227,34 +238,6 @@ Inspect ``results/02-multi-interface-edge/delamination/edge_multi/overlays``
 and the inclusive/exclusive bundles in the adjacent ``masks`` directory. The
 single-interface run from step 1 is written separately, under
 ``results/02-multi-interface-edge/edge_only/edge``.
-
-Cracks and delamination together, in 3D
------------------------------------------
-
-The scene below is a **different specimen** from the rest of this page: a
-three-ply ``[90, -30, 30]`` plus/minus/transverse laminate, rather than
-sample-3's edge-only ``[0, 90, 0]`` workflow. It's included here because
-sample-3 never runs crack detection, so it can't show cracks and
-delamination together -- this laminate has both, at its last analyzed
-frame. Each ply is drawn at an intentionally exaggerated 8 mm thickness with
-a 30 mm gap (real plies are much thinner) so the three layers stay visually
-distinct; the dark prisms are individual cracks and the translucent
-red/blue planes are the primary/secondary delamination masks.
-
-.. raw:: html
-
-   <iframe src="../_static/examples/full_laminate_3d_view.html"
-           width="100%" height="520" style="border: 1px solid #ccc; border-radius: 4px;"
-           loading="lazy">
-   </iframe>
-
-Drag to rotate, scroll to zoom. This is a self-contained ``vtk.js`` export
-(the same mechanism PyVista's own documentation uses for its interactive
-examples: ``Plotter.export_html()`` serializes the actual VTK scene to run
-natively in the browser, so transparency and lighting carry over correctly).
-There is no PyVista -- or any other 3D library -- dependency anywhere in
-DelaDect itself; the scene was generated once, offline, and only the
-resulting static HTML file is shipped with the docs.
 
 Sample-3 itself, in 3D
 ------------------------

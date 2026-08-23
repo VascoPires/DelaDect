@@ -41,20 +41,18 @@ plies. More details about the crack detection can be found in :doc:`../detection
 .. code-block:: python
 
    # imports
-   from pathlib import Path
-
    from deladect.detection import DelaminationDetector, crack_analysis
    from deladect.io import save_specimen
    from deladect.specimen import Specimen
-   
+
    # specimen object
    specimen = Specimen(
        name="01-getting-started",
        scale_px_mm=31.953,
-       path_full=str(data_root / "full"),
-       path_upper_border=str(data_root / "upper"),
-       path_middle=str(data_root / "middle"),
-       path_lower_border=str(data_root / "lower"),
+       path_full="example_images/sample-1/full",
+       path_upper_border="example_images/sample-1/upper",
+       path_middle="example_images/sample-1/middle",
+       path_lower_border="example_images/sample-1/lower",
        image_types=["png"],
        avg_crack_width_px=8.0,
    )
@@ -171,7 +169,7 @@ DelaDect provides two pre-defined layup constructors on :class:`~deladect.specim
    specimen_full = Specimen.from_cross_ply(
        name="01-getting-started-full",
        scale_px_mm=31.953,
-       path_full=str(data_root / "full"),
+       path_full="example_images/sample-1/full",
        image_types=["png"],
        avg_crack_width_px=8.0,
        min_crack_length_px=90.0,
