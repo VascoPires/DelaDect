@@ -1,9 +1,25 @@
 02 - Multi-Interface Edge Delamination
 ======================================
 
-This example shows edge delamination on its own: first on a single interface,
-then across two interfaces with hierarchical promotion. It is an edge-only
-workflow -- no crack detection and no diffuse delamination are involved.
+In the first example, the fundamentals of DelaDect were covered. For that example,
+the specimen had a single interface where delamination detection was performed. However,
+DelaDect also offers the possibility to perform delamination detection across multiple interfaces.
+
+This functionality is only available for edge delamination detection for specimens such as the one
+shown in Sample-3 from the examples provided. Since from a single image we only obtain a distribution 
+of intensity, it is not possible to distinguish between delamination at different interfaces. However, 
+if we have a sequence of images, it is possible to detect delamination at one interface and then 
+if aditional delamination is detected in the same region in subsequent images, we can detect
+delamintion on a different layer. Of course, this approach is built on the assumption that any
+aditional darkening in the same region is due to delamination at a different interface. Also, this approach
+is only valid when delamination shows up sequentually during a mechanichal test and one of the interfaces
+is dominant in the initial stages. This is often the case for laminates such as $[\pm \theta /90^\circ]_s$.
+
+This example is divided into three parts. The first part show how to perform different normalization 
+of the images in a sequence can be performed, here we will see the differences between using the static
+reference and the rolling median reference. The second part shows how to perform delamination detection
+on a single interface. Finally, the third part shows how to perform delamination detection on multiple
+interfaces. 
 
 A `Binder <https://mybinder.org/v2/gh/vascodcpires/deladect/main?labpath=notebooks/multi_interface_edge_delamination.ipynb>`_
 notebook that serves as a companion to this example is available in the
@@ -13,11 +29,10 @@ Building the specimen
 ----------------------
 
 Multi-interface promotion needs at least two interfaces, so this specimen has
-three plies (``[0, 90, 0]``) and two interfaces: ``i0`` between the first two
-plies, and ``i1`` between the last two. ``i0`` is the primary interface;
-``i1`` is the deeper interface that can be *promoted* once evidence of
-delamination persists beneath it. Crack detection isn't needed for this
-workflow, so no ply-level crack parameters are set beyond the defaults.
+three ply directions: 90, -30, 30 (symmetric) and two interfaces: ``90/-30`` between the first two
+plies, and ``-30/30`` between the last two. ``90/-30`` is what we call primary interface, since it
+is the first interface to show delamination, while ``-30/30`` is the secondary interface. 
+As seen before for the getting started example [add here the link], the specimen can be built by:
 
 .. code-block:: python
 
@@ -36,15 +51,15 @@ workflow, so no ply-level crack parameters are set beyond the defaults.
        image_types=["png"],
        avg_crack_width_px=8.0,
    )
-   for index, orientation in enumerate((0.0, 90.0, 0.0)):
+   for index, orientation in enumerate((90.0, -30.0, 30.0)):
        specimen.add_ply(
            name=f"ply_{index}",
            orientation_deg=orientation,
            avg_crack_width_px=8.0,
            min_crack_length_px=20.0,
        )
-   for index in range(2):
-       specimen.add_interface(name=f"i{index}", upper_ply=index, lower_ply=index + 1)
+   specimen.add_interface(name="90/-30", upper_ply=0, lower_ply=1)
+   specimen.add_interface(name="-30/30", upper_ply=1, lower_ply=2)
 
    detector = DelaminationDetector(specimen, specimen.interfaces[0], save_preprocess_outputs=True)
 
