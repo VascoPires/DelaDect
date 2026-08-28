@@ -22,19 +22,19 @@ def main() -> None:
         results_root=str(RESULTS_ROOT),
         avg_crack_width_px=8.0,
     )
-    for index, orientation in enumerate((0.0, 90.0, 0.0)):
+    # Specimen is a symmetric [+30/-30/90]_s laminate. Plies are numbered from
+    # the midplane outward, so "90/-30" -- the innermost interface -- is the
+    # primary interface (delamination shows up there first); "-30/30" is the
+    # secondary interface, promoted once evidence persists beneath "90/-30".
+    for index, orientation in enumerate((90.0, -30.0, 30.0)):
         specimen.add_ply(
             name=f"ply_{index}",
             orientation_deg=orientation,
             avg_crack_width_px=8.0,
             min_crack_length_px=20.0,
         )
-    for index in range(2):
-        specimen.add_interface(
-            name=f"i{index}",
-            upper_ply=index,
-            lower_ply=index + 1,
-        )
+    specimen.add_interface(name="90/-30", upper_ply=0, lower_ply=1)
+    specimen.add_interface(name="-30/30", upper_ply=1, lower_ply=2)
 
     detector = DelaminationDetector(
         specimen,
@@ -42,7 +42,7 @@ def main() -> None:
         save_preprocess_outputs=True,
     )
 
-    # 1. Standalone edge delamination on a single interface (i0). No crack
+    # 1. Standalone edge delamination on a single interface (90/-30). No crack
     #    catalogue and no diffuse pipeline are involved -- detect_primary()
     #    can run entirely on its own.
     primary_only = detector.edge.detect_primary(
@@ -63,11 +63,11 @@ def main() -> None:
         specimen.results_dir("edge_only", "edge", "masks") / "primary.npz",
     )
     primary_only_overlays = specimen.results_dir("edge_only", "edge", "overlays")
-    print(f"Single-interface (i0) edge masks: {primary_only_masks_path}")
-    print(f"Single-interface (i0) edge overlays: {primary_only_overlays}")
+    print(f"Single-interface (90/-30) edge masks: {primary_only_masks_path}")
+    print(f"Single-interface (90/-30) edge overlays: {primary_only_overlays}")
 
-    # 2. Multi-interface promotion across i0 (primary) and i1 (secondary).
-    #    The primary accumulation uses a static reference; the secondary
+    # 2. Multi-interface promotion across 90/-30 (primary) and -30/30
+    #    (secondary). The primary accumulation uses a static reference; the secondary
     #    promotion pass uses a rolling-median reference so it stays sensitive
     #    to change inside the already-established primary region.
     primary_cache = detector.preprocess_stack_to_disk(

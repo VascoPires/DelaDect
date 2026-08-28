@@ -3,8 +3,19 @@ Delamination Detection Methodology
 
 This page explains how the shared delamination workflow fits together. For
 focused explanations of the two damage modes, see :doc:`edge_delamination` and
-:doc:`diffuse_delamination`. For callable signatures and the complete parameter
-reference, see :doc:`delamination`.
+:doc:`diffuse_delamination`. For callable signatures, see :doc:`detection`;
+for the complete parameter reference, see :doc:`parameter_reference`.
+
+Detection modes
+---------------
+
+Edge and diffuse delamination are sub-pages of this methodology:
+
+.. toctree::
+   :maxdepth: 1
+
+   edge_delamination
+   diffuse_delamination
 
 Overview
 --------
@@ -26,16 +37,6 @@ Edge and diffuse detection are exposed as peer sub-detectors reached via
 ``DelaminationDetector``.
 
 .. currentmodule:: deladect.detection.delamination
-
-Core classes
-------------
-
-.. autosummary::
-   :toctree: generated
-
-   DelaminationDetector
-   EdgeDetector
-   DiffuseDetector
 
 Algorithm summary
 -----------------
@@ -68,17 +69,8 @@ current frame, :math:`B` is the reference image, and the small
 :math:`\epsilon` prevents division by zero. A static reference uses a fixed
 baseline frame for :math:`B`; a rolling reference uses the pixelwise median of
 previous frames, making newly appearing damage less likely to be absorbed into
-the denominator.
-
-.. image:: _static/normalization/frame_division_ratio.png
-   :alt: Static reference normalization by frame division
-   :width: 960
-   :align: center
-
-.. image:: _static/normalization/rolling_median_reference.png
-   :alt: Rolling median reference normalization from previous frames
-   :width: 960
-   :align: center
+the denominator. For diagrams of both modes and a code-generated example on
+real data, see :doc:`Image_pre_processing`.
 
 Post-threshold cleanup uses binary closing (dilation then erosion) to fill small
 holes and bridge narrow gaps.
@@ -87,7 +79,9 @@ Combined edge + diffuse
 ^^^^^^^^^^^^^^^^^^^^^^^
 Combined detection runs both pipelines, resolves overlaps in favour of edge
 delamination, and can apply an edge-exclusion halo (``edge_exclusion_px``).
-Reported fractions are decimal values in ``[0, 1]``.
+Reported fractions are decimal values in ``[0, 1]``. For a worked check of
+this precedence rule against known ground truth (including the effect of
+``edge_exclusion_px``), see :doc:`examples/synthetic_validation`.
 
 Multi-interface edge progression
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

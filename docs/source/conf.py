@@ -24,6 +24,7 @@ extensions = [
     'sphinx.ext.napoleon',
     'sphinx.ext.autosummary',
     'sphinx.ext.viewcode',
+    'sphinx_design',
 ]
 
 autosummary_generate = True

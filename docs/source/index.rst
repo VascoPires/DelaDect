@@ -65,8 +65,8 @@ Documentation overview
 
 The documentation is divided into three sections. **Examples** contains
 step-by-step workflows. **User Guide** follows the analysis pipeline from image
-loading through detection and result storage. **API Reference** collects the
-callable classes, functions, parameters, and compatibility interfaces.
+loading through detection and result storage. **Reference** collects the
+callable classes, functions, and the complete parameter listing.
 
 There is also a binder notebooks available in this repository to run the examples without installing DelaDect. 
 You can access it at
@@ -79,7 +79,7 @@ You can access it at
 
    examples/getting_started
    examples/delamination_multi_interface
-   examples/save_reload_results
+   examples/synthetic_validation
 
 .. toctree::
    :maxdepth: 1
@@ -89,19 +89,16 @@ You can access it at
    shift_correction
    Image_pre_processing
    methodology
-   edge_delamination
-   diffuse_delamination
    image_operations
    results_storage
 
 .. toctree::
    :maxdepth: 1
-   :caption: API Reference
+   :caption: Reference
    :hidden:
 
    detection
-   delamination
-   image_handling
+   parameter_reference
 
 .. toctree::
    :maxdepth: 1

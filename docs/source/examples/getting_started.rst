@@ -30,9 +30,9 @@ assuming that the specimen is oriented horizontally).
 
 The benefit of providing separate stacks is that the edge detection 
 can be constrained to the upper and lower regions and diffuse delamination (and crack detection) 
-can be constrained to the middle region. This can be useful when edge and diffuse delamination 
+can be constrained to the middle region. This can be useful when edge and diffuse delamination
 end up connected in a given specimen and edge delamination takes over (see how edge delamination is
-computed in :doc:`../delamination`).
+computed in :doc:`../edge_delamination`).
 
 In the following snippet, a specimen object is created with three separate stacks and the plies and inerface
 are added. As a reminder, an assumption of the tool are that cracks are oriented in the same direction as the 
@@ -128,7 +128,7 @@ The suggested parameters for the delamination detection for this example are the
   edge-connected reconstruction. A ratio of 0.01 seeds from the first 1% of rows in each split half.
 
 More information about these and other parameters can be found in
-:doc:`Delamination Detection Methodology <../delamination>`.
+:doc:`Parameter Reference <../parameter_reference>`.
 The outputs of the crack and delamination detection with the referred parameters are shown below.
 
 .. image:: ../_static/examples/getting_started_detection_outputs.png
@@ -145,7 +145,7 @@ The outputs of the crack and delamination detection with the referred parameters
 
 This minimal example shows how to use DelaDect for a complete analysis of a specimen. To go further,
 continue with :doc:`delamination_multi_interface` for hierarchical multi-interface edge delamination,
-or :doc:`save_reload_results` for persisting and reloading a specimen's results.
+or :doc:`../results_storage` for persisting and reloading a specimen's results.
 
 
 Using the full frame stack
@@ -202,7 +202,7 @@ full image is therefore the better choice. In other cases, however, where edge a
 grow into contact with each other, splitting the image into regions can be preferable, since edge delamination must be
 connected to the specimen edge, and takes precedence over diffuse delamination wherever the two overlap, so an
 unconstrained full-image analysis can misclassify diffuse damage as edge damage once they connect. For a deeper
-understanding of this mechanism, see :doc:`../delamination`, which includes further examples and explanations.
+understanding of this mechanism, see :doc:`../edge_delamination`, which includes further examples and explanations.
 
 
 References

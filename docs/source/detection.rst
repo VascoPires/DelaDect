@@ -1,24 +1,24 @@
 Detection API Reference
 =======================
 
-Overview
---------
-The detection package exposes both crack and delamination workflows under
-``deladect.detection``:
+The public detection API is exposed through :mod:`deladect.detection`. This
+page is intentionally compact: signatures, summaries, classes, methods, and
+functions below are generated from the source docstrings. For algorithm
+explanations and complete workflows, see :doc:`methodology`; for tunable
+settings, see :doc:`parameter_reference`.
 
-- crack-oriented functions in :mod:`deladect.detection.crack_detection`
-- class-based delamination workflows in :mod:`deladect.detection.delamination`
+The package has three public areas:
 
-In current revisions, crack convenience helpers are exposed as function-level
-APIs, not as methods on ``Specimen``.
+- :mod:`deladect.detection.crack_detection` provides crack-analysis functions.
+- :mod:`deladect.detection.crack_tracking` provides crack descriptors and
+  matching helpers used by diffuse delamination workflows.
+- :mod:`deladect.detection.delamination` provides the class-based edge,
+  diffuse, combined, and multi-interface delamination API.
 
 .. currentmodule:: deladect.detection
 
-Public entry points
--------------------
-
 Classes
-^^^^^^^
+-------
 
 .. autosummary::
    :toctree: generated
@@ -26,13 +26,11 @@ Classes
    DelaminationDetector
    EdgeDetector
    DiffuseDetector
-   crack_detection
-   delamination
-
-Class walkthroughs and examples are documented in :doc:`delamination`.
+   CrackDetection
+   CrackTrack
 
 Functions
-^^^^^^^^^
+---------
 
 .. autosummary::
    :toctree: generated
@@ -40,123 +38,38 @@ Functions
    crack_analysis
    crack_eval
    plot_cracks
+   normalize_detections
+   match_tracks
+
+Modules
+-------
+
+The module pages provide automatically generated class/function inventories,
+matching the organization of the source package.
+
+.. autosummary::
+   :toctree: generated
+
+   crack_detection
+   crack_tracking
+   delamination
 
 Coordinate convention
 ---------------------
-Crack segments follow ``[row, col]`` ordering (equivalent to ``[y, x]``).
 
-- In memory: ``[[row0, col0], [row1, col1]]``
-- In plots: ``col`` maps to x-axis, ``row`` maps to y-axis
+Crack segments use ``[row, col]`` ordering, equivalent to ``[y, x]``:
 
-Keep this convention when implementing custom spacing/grouping logic.
+- in memory: ``[[row0, col0], [row1, col1]]``
+- in plots: ``col`` maps to the x-axis and ``row`` maps to the y-axis
 
-Common recipes
---------------
+Keep this convention when implementing custom spacing, grouping, or tracking
+logic.
 
-Cross-ply crack detection (sample-1)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Related documentation
+---------------------
 
-.. code-block:: python
-
-    from pathlib import Path
-
-   from deladect.detection import crack_analysis
-   from deladect.specimen import Specimen
-   from skimage.io import imread
-
-    data_root = Path("specimen_examples") / "sample-1"
-    frame_paths = sorted(data_root.glob("*.png"))
-
-    specimen = Specimen.from_cross_ply(
-        name="sample-1",
-        scale_px_mm=41.03328366,
-        path_full=str(data_root),
-        sorting_key="_sc",
-        image_types=["png"],
-        auto_init_stacks=False,
-        results_root="results",
-        avg_crack_width_px=8.0,
-    )
-
-    specimen.path_full_list = [str(path) for path in frame_paths]
-    specimen.image_stack_full = [imread(str(path)) for path in frame_paths]
-
-    crack_results = crack_analysis(specimen, export_images=True, save_cracks=True)
-
-    print(crack_results.keys())  # typically dict_keys(['0', '90'])
-    print(crack_results["0"]["metrics"].head())
-
-Combined delamination
-^^^^^^^^^^^^^^^^^^^^^
-
-.. code-block:: python
-
-   from deladect.detection import DelaminationDetector
-
-    # from_cross_ply already added a single "0/90" interface between the two plies
-    interface = specimen.interfaces[0]
-    detector = DelaminationDetector(specimen, interface)
-
-    combined = detector.detect_both_delaminations(
-        cracks=crack_results,
-        save_masks=True,
-        save_metrics=True,
-        edge_exclusion_px=5,
-    )
-
-   print(combined["paths"]["metrics"])
-
-Passing the complete result merges every analyzed orientation frame by frame.
-Restrict the diffuse crack families with
-``crack_analysis(specimen, orientations=[...])`` when needed.
-
-Tuning edge and diffuse windows
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-The only settings overridden below are ``window_edge`` (edge) and
-``window_diffuse`` (diffuse); everything else in ``edge_params`` /
-``diffuse_params`` is left at its default:
-
-.. code-block:: python
-
-   # diffuse delamination parameters
-   diffuse_params = {
-       "window_diffuse": (30, 30),
-       "diffuse_dx": 20.0,
-       "diffuse_dy": 20.0,
-   }
-
-   # edge delamination parameters
-   edge_params = {
-       "window_edge": (1, 60),
-       "seed_ratio": 0.01,
-   }
-
-   combined = detector.detect_both_delaminations(
-       cracks=crack_results,
-       save_masks=True,
-       save_metrics=True,
-       edge_params=edge_params,
-       diffuse_params=diffuse_params,
-   )
-
-Troubleshooting quick notes
----------------------------
-- ``ImportError: crackdect is required``: install and activate an environment
-  compatible with CrackDect and NumPy.
-- Missing overlays/masks: ensure ``save_overlays=True`` and/or
-  ``save_masks=True`` in workflow calls.
-- Unexpected crack direction: verify ply orientation metadata and the resulting
-  ``theta`` mapping.
-- Diffuse over-detection: increase ``reference_skip`` and reduce
-  ``post_threshold_closing_scale`` before changing many other parameters.
-
-See also
---------
-- :doc:`delamination` for edge, diffuse, combined, and multi-interface logic.
-- :doc:`examples/getting_started` for crack detection in a complete analysis,
-  including split-region (upper/middle/lower) versus full-frame input.
-- :doc:`examples/delamination_multi_interface` for the sample-3 multi-interface workflow.
-- :doc:`results_storage` for NPZ/metadata storage conventions.
-
-API details are available in autogenerated pages under ``docs/source/generated``.
+- :doc:`methodology` explains the complete delamination workflow.
+- :doc:`edge_delamination` and :doc:`diffuse_delamination` explain the two
+  detection modes.
+- :doc:`parameter_reference` lists every detector setting.
+- :doc:`examples/getting_started` provides a complete runnable analysis.

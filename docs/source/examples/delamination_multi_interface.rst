@@ -10,10 +10,16 @@ shown in Sample-3 from the examples provided. Since from a single image we only 
 of intensity, it is not possible to distinguish between delamination at different interfaces. However,
 if we have a sequence of images, it is possible to detect delamination at one interface and then
 if additional delamination is detected in the same region in subsequent images, we can detect
-delamination on a different layer. Of course, this approach is built on the assumption that any
-additional darkening in the same region is due to delamination at a different interface. Also, this approach
-is only valid when delamination shows up sequentially during a mechanical test and one of the interfaces
-is dominant in the initial stages. This is often the case for laminates such as :math:`[\pm \theta /90^\circ]_s`.
+delamination on a different layer.
+
+.. note::
+
+   This approach is built on the assumption that any additional darkening in
+   the same region is due to delamination at a different interface, and it
+   is only valid when delamination shows up sequentially during a
+   mechanical test with one interface dominant in the initial stages. This
+   is often the case for laminates such as :math:`[\pm \theta /90^\circ]_s`,
+   but it is an assumption, not something the algorithm verifies.
 
 This example is divided into three parts. The first part shows how different normalization
 of the images in a sequence can be performed, here we will see the differences between using the static
@@ -24,6 +30,36 @@ interfaces.
 A `Binder <https://mybinder.org/v2/gh/vascodcpires/deladect/main?labpath=notebooks/multi_interface_edge_delamination.ipynb>`_
 notebook that serves as a companion to this example is available in the
 repository and can be run without installation.
+
+.. grid:: 2 2 4 4
+   :gutter: 2
+
+   .. grid-item-card:: Build the specimen
+      :link: multi-interface-build
+      :link-type: ref
+
+      Three plies, two interfaces, and the primary/secondary distinction.
+
+   .. grid-item-card:: Standalone edge
+      :link: multi-interface-standalone
+      :link-type: ref
+
+      ``detect_primary`` on one interface, no promotion involved.
+
+   .. grid-item-card:: Multi-interface promotion
+      :link: multi-interface-promotion
+      :link-type: ref
+
+      ``detect_edge_multi``, static vs. rolling-median caches, and the
+      observed result.
+
+   .. grid-item-card:: Out30-p1, in 3D
+      :link: multi-interface-3d
+      :link-type: ref
+
+      An interactive, real-data 3D render of the promoted interfaces.
+
+.. _multi-interface-build:
 
 Building the specimen
 ----------------------
@@ -81,13 +117,15 @@ The script uses the ten frames in ``example_images/sample-3`` and writes below
 
    python examples/02_multi_interface_edge_delamination.py
 
+.. _multi-interface-standalone:
+
 1. Standalone edge delamination
 --------------------------------
 
 :meth:`~deladect.detection.delamination.EdgeDetector.detect_primary` runs
 entirely on its own -- no crack catalogue, no diffuse pipeline, and no second
 interface required. This is the same edge algorithm used inside
-``detect_both_delaminations``, just called directly on ``i0``.
+``detect_both_delaminations``, just called directly on ``90/-30``.
 
 .. code-block:: python
 
@@ -113,14 +151,16 @@ interface required. This is the same edge algorithm used inside
 requested); the snippet above saves the returned masks explicitly with
 ``save_mask_bundle`` so they persist alongside the overlays.
 
+.. _multi-interface-promotion:
+
 2. Multi-interface promotion
 ------------------------------
 
 :meth:`~deladect.detection.delamination.EdgeDetector.detect_edge_multi` adds
 hierarchical promotion to a deeper interface. It needs two separate
 preprocessing caches: a *static*-reference cache drives the primary
-accumulation at ``i0``, while a *rolling-median*-reference cache drives the
-promotion check at ``i1`` -- it must stay sensitive to change happening
+accumulation at ``90/-30``, while a *rolling-median*-reference cache drives the
+promotion check at ``-30/30`` -- it must stay sensitive to change happening
 inside a region already flagged as damaged, which a static reference would no
 longer highlight.
 
@@ -175,35 +215,45 @@ longer highlight.
 
 For the full promotion mechanics -- how a candidate becomes promoted, and
 what each parameter in ``secondary_params`` actually does -- see
-:doc:`../edge_delamination`.
+:doc:`../edge_delamination`. For the conceptual *why* behind static vs.
+rolling-median references, with schematic diagrams, see
+:doc:`../Image_pre_processing`.
 
-Static vs. rolling-median preprocessing
-"""""""""""""""""""""""""""""""""""""""
+Static vs. rolling-median preprocessing, on this data
+""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-The figure below compares both caches at the same frame (the last sampled
-frame, where they have diverged the most): the *baseline* each reference
-mode computes, and the resulting *processed* frame.
+A quick, concrete look at what the two caches created above actually produce,
+straight from this run: the *baseline* each reference mode computes, and the
+resulting *processed* frame, at the last sampled frame (where they've
+diverged the most).
+
+.. code-block:: python
+
+   import numpy as np
+
+   frame_idx = 9  # last sampled frame, where the two references have diverged the most
+   cache_root = specimen.results_dir("Preprocessor_cache")
+
+   def load_frame(key: str) -> dict:
+       path = cache_root / key / f"preprocess_{frame_idx:04d}.npz"
+       with np.load(path, allow_pickle=False) as payload:
+           return {"baseline": payload["baseline"], "processed": payload["processed"]}
+
+   static = load_frame("primary_static")
+   rolling = load_frame("secondary_rolling")
 
 .. figure:: ../_static/examples/static_vs_rolling_median_preprocessing.png
    :alt: Static vs rolling-median reference preprocessing compared on the same frame of Sample-3
    :width: 100%
    :align: center
 
-   Sample-3, frame 9. **Top row:** the static baseline is fixed to an early
-   reference frame, so it never absorbs the delamination front; the processed
-   frame shows it as one strong, high-contrast band. **Bottom row:** the
+   Sample-3, frame 272. **(a)** the static baseline is fixed to an early
+   reference frame, so it never absorbs the delamination front; the
+   normalized frame shows it as one strong, high-contrast band. **(b)** the
    rolling-median baseline (window=7, skip=2) tracks recent frames, so it
    partially absorbs the already-established front into the baseline itself
-   -- the processed band is fainter and narrower, but the reference stays
+   -- the normalized band is fainter and narrower, but the reference stays
    sensitive to *new* change happening on top of it.
-
-This is exactly why the two caches are used for different roles above: the
-static cache accumulates ``i0``'s primary damage without ever "forgetting"
-it, while the rolling-median cache is what lets ``detect_edge_multi`` notice
-further change *inside* an already-flagged ``i0`` region and promote it to
-``i1``. Using a rolling-median cache for the primary accumulation instead
-would risk the opposite problem: established delamination could fade back
-into the baseline over time and disappear from the processed signal.
 
 Observed result
 ----------------
@@ -213,23 +263,23 @@ Observed result
    :width: 100%
    :align: center
 
-   **(a)** Standalone ``detect_primary`` on ``i0`` alone. **(b)** The same
-   frame from ``detect_edge_multi``: ``i0`` unchanged, plus ``i1`` promoted
-   wherever the rolling-median pass found further change inside the settled
-   ``i0`` region.
+   **(a)** Standalone ``detect_primary`` on ``90/-30`` alone. **(b)** The same
+   frame from ``detect_edge_multi``: ``90/-30`` unchanged, plus ``-30/30``
+   promoted wherever the rolling-median pass found further change inside the
+   settled ``90/-30`` region.
 
-``i0`` begins growing from the third sampled frame onward and reaches
-2,015,119 pixels by the final frame. ``i1`` stays at zero until the final
+``90/-30`` begins growing from the third sampled frame onward and reaches
+2,015,119 pixels by the final frame. ``-30/30`` stays at zero until the final
 sampled frame, where it appears with 318,015 pixels -- visible as the blue
 regions in panel (b) above, concentrated near the top and bottom edges rather
-than spread along ``i0``'s full length.
+than spread along ``90/-30``'s full length.
 
 .. figure:: ../_static/examples/multi_interface_area_plot.png
-   :alt: Detected area in pixels for i0 and i1 plotted against frame number
-   :width: 70%
+   :alt: Detected area in pixels for interfaces 90/-30 and -30/30 plotted against frame number
+   :width: 100%
    :align: center
 
-   Detected area per interface across the sampled frames. ``i1`` only
+   Detected area per interface across the sampled frames. ``-30/30`` only
    registers non-zero area once promotion condition is met in the last frame;
    these values are useful smoke-test expectations for this dataset, not
    universal thresholds.
@@ -239,14 +289,19 @@ and the inclusive/exclusive bundles in the adjacent ``masks`` directory. The
 single-interface run from step 1 is written separately, under
 ``results/02-multi-interface-edge/edge_only/edge``.
 
-Sample-3 itself, in 3D
+.. _multi-interface-3d:
+
+Out30-p1, in 3D
 ------------------------
 
-Unlike the illustrative laminate above, this scene is result-backed: it's
-specimen ``Out30-p1`` at frame 217, rendered directly from the crack and
-interface-mask artefacts this page's ``detect_edge_multi`` walkthrough
-produced -- real ply geometry, real detected cracks, real delamination
-masks, no exaggeration.
+Unlike the illustrative laminate above and the sample-3 walkthrough on the
+rest of this page, this scene is result-backed with a *different*, real
+specimen: ``Out30-p1`` from the EMB90 study, the same ``[+30/-30/90]_s``
+laminate, at frame 217, rendered directly from the crack and interface-mask
+artefacts its own ``detect_edge_multi`` run produced (using the same
+DelaDect API this page walks through, just on the real EMB90 study data
+rather than sample-3) -- real ply geometry, real detected cracks, real
+delamination masks, no exaggeration.
 
 .. raw:: html
 
@@ -280,15 +335,26 @@ masks, no exaggeration.
      });
    </script>
 
-Drag to rotate, scroll to zoom. Same ``Plotter.export_html()`` mechanism as
-above, rendered with a white background to match the docs page. Both crack
-states are pre-rendered from the same camera angle and swapped client-side,
-so toggling is instant; rotating one view and then flipping the checkbox
-resets to that shared starting angle rather than carrying your rotation over.
+Drag to rotate, scroll to zoom.
+
+.. dropdown:: How the crack-toggle mechanism works
+   :icon: gear
+   :color: secondary
+
+   Same ``Plotter.export_html()`` mechanism as above, rendered with a white
+   background to match the docs page. Both crack states are pre-rendered
+   from the same camera angle and swapped client-side, so toggling is
+   instant; rotating one view and then flipping the checkbox resets to that
+   shared starting angle rather than carrying your rotation over.
+
+.. _multi-interface-input-limitation:
 
 Input limitation
 ------------------
 
-Multi-interface promotion currently requires a full-height stack (or
-full-height preprocessed frames). Explicit upper, middle, and lower region
-stacks, as used in :doc:`getting_started`, are not supported by this path.
+.. warning::
+
+   Multi-interface promotion currently requires a full-height stack (or
+   full-height preprocessed frames). Explicit upper, middle, and lower
+   region stacks, as used in :doc:`getting_started`, are **not** supported
+   by this path.
