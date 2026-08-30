@@ -1,299 +1,98 @@
 Delamination Detection Methodology
 ==================================
 
-This page explains how the shared delamination workflow fits together. For
-focused explanations of the two damage modes, see :doc:`edge_delamination` and
-:doc:`diffuse_delamination`. For callable signatures, see :doc:`detection`;
-for the complete parameter reference, see :doc:`parameter_reference`.
+Edge and diffuse delamination are both reached through a single
+:class:`~deladect.detection.delamination.DelaminationDetector` per
+``(specimen, interface)`` pair. Then two other detectors are available inside
+the same object, for the two delamination modes:
+``detector.edge`` and
+``detector.diffuse``.
 
 Detection modes
 ---------------
 
-Edge and diffuse delamination are sub-pages of this methodology:
+DelaDect distinguishes two delamination modes, each documented on its own page:
+
+.. grid:: 1 2 3 3
+   :gutter: 2
+
+   .. grid-item-card:: Edge delamination
+      :link: edge_delamination
+      :link-type: doc
+
+      Damage connected to a specimen free edge: directional reconstruction
+      and frame-to-frame latching.
+
+   .. grid-item-card:: Diffuse delamination
+      :link: diffuse_delamination
+      :link-type: doc
+
+      Damage sought locally around tracked transverse cracks, using a
+      per-crack baseline to isolate new darkening.
+
+   .. grid-item-card:: Multi-interface delamination
+      :link: multi_interface_delamination
+      :link-type: doc
+
+      Attributing later damage to the correct, deeper interface in
+      laminates with more than two plies. Edge-only.
 
 .. toctree::
    :maxdepth: 1
+   :hidden:
 
    edge_delamination
    diffuse_delamination
+   multi_interface_delamination
 
-Overview
+Combining the two
+------------------
+
+:meth:`~deladect.detection.delamination.DelaminationDetector.detect_both_delaminations`
+runs both pipelines together and resolves any overlap
+between the two modes favouring the edge delamination.
+
+Known limitation: connected edge regions in a full-image run
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This section describes a separate, intentionally unconstrained full-image
+experiment; it is not output from the split-region :doc:`examples/getting_started`
+run. In that comparison, frame 0003 illustrates a classification limitation
+that occurs when edge detection is run on the full image rather than
+constrained to explicit upper and lower regions. Delamination growing inward
+from the upper and lower specimen boundaries has connected into one edge-mask
+component. That component touches both boundaries and also occupies part of
+the specimen middle, where diffuse delamination may physically be present.
+
+The combined workflow resolves overlap with edge precedence: a diffuse
+candidate is classified exclusively as edge wherever the masks overlap. In
+the unconstrained comparison, 26,032 of 26,058 diffuse-candidate pixels
+(99.90 percent) overlap the edge-exclusion mask. Only 26 diffuse pixels
+survive in the complete frame. By contrast, the verified split-region
+Getting Started run produces 662,041 diffuse candidates, 5,327 overlapping
+pixels (0.80 percent), and 656,714 surviving diffuse pixels for frame 0003.
+The square-cell diagram below shows the unconstrained mask relationship over
+the full specimen height in a representative 600-pixel-wide region.
+
+.. figure:: _static/examples/connected_edge_square_masks.svg
+   :alt: Connected edge delamination limitation in Sample-1 frame 0003
+   :width: 100%
+   :align: center
+
+   Sample-1 frame 0003, shown as 30-by-30-pixel square cells over the full
+   specimen height. Panel 1 isolates the edge component that touches both the
+   upper and lower boundaries. Panel 2 shows diffuse candidates as green
+   vertical stripes over the pale-red edge mask. In panel 3, those stripes are
+   red because edge precedence overwrites the overlapping diffuse label.
+
+This demonstrates ambiguity in the classification rule, not proof of the
+physical damage class at every pixel. Once edge regions connect through the
+middle, DelaDect cannot represent coexisting edge and diffuse labels there.
+The explicit region configuration used by the Getting Started example avoids
+that specific failure mode by preventing the edge detector from evaluating
+the middle rows.
+
+See also
 --------
-Delamination detection is provided by the class-based
-:class:`deladect.detection.delamination.DelaminationDetector` workflow.
 
-The API is organized around one detector instance per ``(specimen, interface)`` pair:
-
-- preprocessing helpers (history clamp + reference normalization)
-- edge delamination (:meth:`EdgeDetector.detect_primary`)
-- diffuse delamination (:meth:`DiffuseDetector.diffuse_delamination`)
-- combined arbitration (:meth:`DelaminationDetector.detect_both_delaminations`)
-- hierarchical edge promotion across multiple interfaces
-  (:meth:`EdgeDetector.detect_edge_multi`)
-
-Edge and diffuse detection are exposed as peer sub-detectors reached via
-``detector.edge`` and ``detector.diffuse`` respectively; shared infrastructure
-(preprocessing, caching, combined arbitration) lives directly on
-``DelaminationDetector``.
-
-.. currentmodule:: deladect.detection.delamination
-
-Algorithm summary
------------------
-
-Primary edge detection
-^^^^^^^^^^^^^^^^^^^^^^
-For each frame, the edge workflow:
-
-1. Splits into upper/lower halves (lower is flipped internally).
-2. Applies directional morphology + unsharp + Gaussian smoothing.
-3. Thresholds to a binary candidate map.
-4. Reconstructs an edge-connected snapshot from a shallow top seed region.
-5. Latches detections frame-to-frame.
-
-Diffuse detection (crack-guided)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Diffuse detection uses crack segments to define local ROIs and computes a single
-threshold per frame from the union of ROI values. It then segments each ROI and
-accumulates masks over time.
-
-When preprocessed cache metadata is available, diffuse crack-frame selection can
-be aligned to the normalization reference window (for example midpoint or latest
-reference frame) instead of always using same-frame cracks.
-
-Reference normalization divides the current frame by a reference image to reduce
-illumination drift and highlight changes relative to that reference. In the
-implementation this is computed pixelwise as
-:math:`\mathrm{clip}(I_n / \max(B, \epsilon), 0, 1)`, where :math:`I_n` is the
-current frame, :math:`B` is the reference image, and the small
-:math:`\epsilon` prevents division by zero. A static reference uses a fixed
-baseline frame for :math:`B`; a rolling reference uses the pixelwise median of
-previous frames, making newly appearing damage less likely to be absorbed into
-the denominator. For diagrams of both modes and a code-generated example on
-real data, see :doc:`Image_pre_processing`.
-
-Post-threshold cleanup uses binary closing (dilation then erosion) to fill small
-holes and bridge narrow gaps.
-
-Combined edge + diffuse
-^^^^^^^^^^^^^^^^^^^^^^^
-Combined detection runs both pipelines, resolves overlaps in favour of edge
-delamination, and can apply an edge-exclusion halo (``edge_exclusion_px``).
-Reported fractions are decimal values in ``[0, 1]``. For a worked check of
-this precedence rule against known ground truth (including the effect of
-``edge_exclusion_px``), see :doc:`examples/synthetic_validation`.
-
-Multi-interface edge progression
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-``detect_edge_multi`` promotes damage across an ordered interface list
-(``interfaces=[i0, i1, i2, ...]``):
-
-- level 1 is primary edge damage
-- level ``k+1`` must come from level ``k`` candidates
-- promotion is gated by similarity and persistence
-- terminal-frame promotion is supported (default)
-
-This workflow follows the legacy workbook logic while exposing a cleaner API
-for multi-interface runs.
-
-Recommended preprocessing for multi-interface runs
---------------------------------------------------
-``detect_edge_multi`` requires preprocessed input and logs a reminder when called.
-
-Recommended settings:
-
-- ``reference_mode="rolling_median"``
-- ``reference_skip >= 1``
-
-This helps avoid self-canceling reference behavior during promotion.
-For detailed guidance on static-reference limits and rolling alternatives, see
-:doc:`Image_pre_processing`.
-
-Overlay helper for saved masks
-------------------------------
-When combined mask bundles already exist on disk, you can regenerate individual
-views without rerunning detection:
-
-.. code-block:: python
-
-    detector.save_delamination_overlay(frame_idx=12, overlay_type="edge")
-    detector.save_delamination_overlay(frame_idx=12, overlay_type="diffuse")
-    detector.save_delamination_overlay(frame_idx=12, overlay_type="both")
-    detector.save_delamination_overlay(frame_idx=12, overlay_type="total_dela")
-
-Typical workflows
------------------
-
-Primary edge only
-^^^^^^^^^^^^^^^^^
-
-.. code-block:: python
-
-    from deladect.detection import DelaminationDetector
-
-    detector = DelaminationDetector(specimen, interface)
-    edge_result = detector.edge.detect_primary(
-        processed_cache_paths=cache_paths,
-        save_overlays=True,
-        overlay_view="both",
-        debug=True,
-    )
-    edge_masks, edge_debug = edge_result["masks"], edge_result["debug"]
-
-Diffuse only
-^^^^^^^^^^^^
-
-.. code-block:: python
-
-    diffuse_result = detector.diffuse.diffuse_delamination(
-        cracks=cracks,
-        processed_cache_paths=cache_paths,
-        save_overlays=True,
-        debug=True,
-    )
-    diffuse_masks, diffuse_debug = diffuse_result["masks"], diffuse_result["debug"]
-
-Combined edge + diffuse
-^^^^^^^^^^^^^^^^^^^^^^^
-
-.. code-block:: python
-
-    result = detector.detect_both_delaminations(
-        cracks=cracks,
-        processed_cache_paths=cache_paths,
-        edge_exclusion_px=5,
-        overlay_view="classified",
-        save_masks=True,
-        save_metrics=True,
-        return_masks=False,
-    )
-
-    metrics = result["metrics"]
-
-Multi-interface edge progression
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. code-block:: python
-
-    multi = detector.edge.detect_edge_multi(
-        interfaces=specimen.interfaces,
-        processed_cache_paths=primary_cache_paths,
-        secondary_cache_paths=rolling_cache_paths,
-        save_masks=True,
-        save_overlays=True,
-        secondary_params={
-            "secondary_similarity_threshold": 0.6,
-        },
-    )
-
-Key parameter groups
---------------------
-
-Edge primary parameters (``detect_primary(params=...)``)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-- ``window_edge=(0, 60)``
-- ``threshold_strategy="kmeans"``
-- ``gaussian_filters=(0.5, 15.0)``
-- ``scale_min=None``, ``scale_max=None`` (percentile-based scaling is the
-  default; set both explicitly to switch to fixed-bound scaling)
-- ``seed_ratio=0.01``
-- ``connectivity_mode="directional"`` (also supports strict ``"columnwise"``;
-  the former ``"legacy_flood"`` mode was removed)
-- ``directional_lateral_drift_px=None``
-- ``directional_lateral_drift_scale=0.25``
-- ``hard_floor=0.90`` (normalized gate on smoothed image; tweak per specimen)
-- ``post_threshold_closing_px=4`` (pixel-radius closing; this is the active
-  default -- takes precedence over ``post_threshold_closing_scale`` whenever set)
-- ``post_threshold_closing_scale=None`` (optional size-relative closing,
-  scaled by ``avg_crack_width_px``; only used when ``post_threshold_closing_px``,
-  ``post_threshold_closing_radius``, and ``pre_threshold_closing_radius`` are
-  all ``None``)
-- ``post_threshold_closing_radius`` (optional explicit override; ``0`` disables closing)
-- ``pre_threshold_closing_radius`` (legacy alias for explicit closing radius)
-- ``min_object_px=0`` (remove small connected components after closing)
-
-Diffuse parameters (``detector.diffuse.diffuse_delamination(params=...)``)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-- ``diffuse_dx=20.0``, ``diffuse_dy=20.0``
-- ``crack_frame_policy in {"current", "reference_latest", "reference_midpoint"}``
-- ``threshold_max_samples=200000``
-- ``threshold_downsample=2``
-- ``window_diffuse=(0, 60)``
-- ``gaussian_filters=(0.5, 15.0)``
-- ``scale_min=150.0``, ``scale_max=255.0`` (fixed scaling bounds)
-- ``scale_min_percentile=10.0``, ``scale_max_percentile=99.0``
-  (when both are set, per-ROI percentiles override fixed bounds)
-- ``hard_floor=0.90`` (normalized gate on diffuse-smoothed ROI; tweak per specimen)
-- ``post_threshold_closing_px=4`` (pixel-radius closing; this is the active
-  default -- takes precedence over ``post_threshold_closing_scale`` whenever set)
-- ``post_threshold_closing_scale=None`` (optional size-relative closing,
-  scaled by ``avg_crack_width_px``; only used when ``post_threshold_closing_px``
-  is ``None``)
-
-For a lagged single-frame rolling reference, use preprocessing
-``reference_mode="rolling_median"`` with ``reference_window=1`` and tune
-``reference_skip`` for lag depth.
-
-Diffuse troubleshooting (practical order)
------------------------------------------
-If diffuse masks look too broad (for example rectangular ROI-like masks), tune
-in this order:
-
-1. increase preprocessing ``reference_skip`` (start with ``1`` or ``2``)
-2. reduce ``post_threshold_closing_px`` (for example ``4 -> 2``); it's the
-   active default and takes precedence over ``post_threshold_closing_scale``
-3. tighten ROI geometry (``diffuse_dx``, ``diffuse_dy``)
-4. retune ``window_diffuse`` and threshold sampling controls
-
-For repeatable troubleshooting on sample-1, see:
-
-- ``notebooks/sample1_diffuse_threshold_troubleshooting.ipynb``
-- ``notes/sample1_benchmark_protocol.md``
-
-Multi-interface promotion parameters (``detect_edge_multi(params=...)``)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-- ``secondary_similarity_threshold=0.6``
-- ``min_primary_frac_for_secondary=0.0``
-- ``secondary_start_frame=None``
-
-Use ``processed_cache_paths`` for static-reference primary detection and
-``secondary_cache_paths`` for rolling-median secondary detection.
-
-Output layout
--------------
-
-Combined edge + diffuse
-^^^^^^^^^^^^^^^^^^^^^^^
-- overlays: ``results/<specimen>/<overlay_dirname>/both/overlays/``
-- masks: ``results/<specimen>/<overlay_dirname>/both/<masks_dirname>/``
-- metrics: ``results/<specimen>/<overlay_dirname>/both/metrics/frame_metrics.csv``
-
-Multi-interface edge
-^^^^^^^^^^^^^^^^^^^^
-- overlays: ``results/<specimen>/<overlay_dirname>/edge_multi/overlays/``
-- masks: ``results/<specimen>/<overlay_dirname>/edge_multi/<masks_dirname>/``
-  containing ``<interface>_inclusive.npz`` and ``<interface>_exclusive.npz``
-
-Figure placeholders you can add
--------------------------------
-The following figure slots mirror CrackDect-style documentation and are useful
-for review decks. Create them under ``docs/source/_static/delamination/`` and
-insert them with ``.. figure::``.
-
-1. ``pipeline_overview.png``
-   - one-page flow: preprocessing -> edge/diffuse -> overlap arbitration -> outputs
-2. ``edge_primary_step_panels.png``
-   - raw, filtered, binary, latched primary mask
-3. ``diffuse_roi_threshold.png``
-   - one frame showing crack ROIs and the per-frame diffuse threshold
-4. ``combined_classified_overlay.png``
-   - edge (red) + diffuse (green) classified overlay
-5. ``multi_interface_levels.png``
-   - level map for i0/i1 in distinct colors
-
-Related example
----------------
-See :doc:`examples/delamination_multi_interface` for a complete sample-3 walkthrough.
-See :doc:`results_storage` for bundle names and metadata path keys.
-
-API details are available in the autogenerated pages under ``docs/source/generated``.
+- :doc:`detection` for the callable API and default parameter values.

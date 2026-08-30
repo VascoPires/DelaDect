@@ -127,8 +127,8 @@ The suggested parameters for the delamination detection for this example are the
 - ``seed_ratio`` is the fraction of rows, starting from the specimen edge, trusted as the initial seed region for
   edge-connected reconstruction. A ratio of 0.01 seeds from the first 1% of rows in each split half.
 
-More information about these and other parameters can be found in
-:doc:`Parameter Reference <../parameter_reference>`.
+More information about these and other parameters can be found in the
+:doc:`Detection API Reference <../detection>`.
 The outputs of the crack and delamination detection with the referred parameters are shown below.
 
 .. image:: ../_static/examples/getting_started_detection_outputs.png

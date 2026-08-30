@@ -150,7 +150,7 @@ class EdgeDetector:
     The class exposes:
 
     - :meth:`detect_primary` for single-interface edge tracking.
-    - :meth:`detect_edge_multi` for hierarchical multi-interface promotion.
+    - :meth:`detect_edge_multi` for hierarchical multi-interface delamination.
     """
 
     def __init__(self, owner: DelaminationDetector) -> None:
@@ -511,7 +511,7 @@ class EdgeDetector:
     ) -> Dict[str, Any]:
         """Detect hierarchical edge delamination across multiple interfaces.
 
-        The first level uses primary edge detection. Each deeper level is promoted from
+        The first level uses primary edge detection. Each deeper level is attributed from
         its parent level using workbook-inspired candidate logic, similarity gating,
         persistence confirmation, and edge-connected reconstruction.
 
@@ -527,7 +527,7 @@ class EdgeDetector:
         secondary_cache_paths:
             Optional separate cache for the **secondary** binary/mask step.  When provided,
             rolling-median-preprocessed frames from this cache are used to compute the
-            binary and mask used for hierarchical promotion, while
+            binary and mask used for hierarchical attribution, while
             ``processed_cache_paths`` drives the primary latched accumulation only.
             Both caches must have the same frame count.
         save_overlays:
@@ -545,10 +545,10 @@ class EdgeDetector:
             gaussian_filters, hard_floor, closing_px, seed_ratio, etc.
         secondary_edge_params:
             Edge detection parameters applied to ``secondary_cache_paths`` frames when
-            computing binary/mask for the promotion logic.  Ignored if
+            computing binary/mask for the attribution logic.  Ignored if
             ``secondary_cache_paths`` is not set.
         secondary_params:
-            Promotion parameters for deeper levels: secondary_similarity_threshold.
+            Attribution parameters for deeper levels: secondary_similarity_threshold.
         params:
             Legacy single-dict interface (backward compat). Keys are merged into
             primary_params as a base; primary_params and secondary_params take precedence.
@@ -931,7 +931,7 @@ class EdgeDetector:
         return result
 
     def _resolve_multi_params(self, params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        """Merge and validate multi-interface promotion parameters."""
+        """Merge and validate multi-interface attribution parameters."""
         resolved = {
             "secondary_similarity_threshold": 0.6,
             "min_primary_frac_for_secondary": 0.0,

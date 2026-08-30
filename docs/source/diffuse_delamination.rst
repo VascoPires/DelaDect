@@ -78,7 +78,6 @@ identity. The geometric gates reduce accidental identity swaps, while the
 local ROI prevents unrelated dark regions elsewhere in the specimen from
 driving the classification.
 
-See :doc:`detection` for the complete API, :doc:`parameter_reference` for
-tunable parameters, and :doc:`image_operations` for the individual filtering
-operations.
+See :doc:`detection` for the complete API and default parameter values, and
+:doc:`image_operations` for the individual filtering operations.
 

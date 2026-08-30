@@ -2,6 +2,7 @@
   <img src="docs/source/deladect_logo_white.svg" alt="DelaDect logo" width="600">
 </p>
 
+<h3 align="center">Quantitative crack and delamination detection for fiber-reinforced polymers</h3>
 
 <p align="center">
   <a href="https://deladect.readthedocs.io">
@@ -10,17 +11,30 @@
   <a href="https://mybinder.org/v2/gh/VascoPires/DelaDect/HEAD">
     <img src="https://mybinder.org/badge_logo.svg" alt="Binder">
   </a>
+  <a href="https://pypi.org/project/deladect/">
+    <img src="https://img.shields.io/pypi/v/deladect?logo=pypi&logoColor=white" alt="PyPI">
+  </a>
+  <a href="#citing-deladect">
+    <img src="https://img.shields.io/badge/DOI-pending-lightgrey?logo=doi" alt="Paper DOI (pending)">
+  </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/github/license/VascoPires/DelaDect" alt="License">
   </a>
 </p>
-
 
 <p align="center">
   <img src="docs/source/_static/sample5_sequence.gif" alt="DelaDect visualization" width="720">
 </p>
 
 DelaDect is a Python package for quantitative damage analysis in fiber-reinforced polymers. Out of the box it is able to perform crack and delamination detection based on image sequences.
+
+## Highlights
+
+- **Crack detection** built on top of [CrackDect](https://github.com/mattdrvo/CrackDect), tracked frame-to-frame to give every crack a persistent identity.
+- **Diffuse delamination** detected locally around tracked cracks, comparing each neighborhood against its own baseline frame.
+- **Edge delamination** reconstructed from the specimen free edge, with directional or columnwise connectivity and frame-to-frame latching.
+- **Multi-interface delamination**, hierarchically attributing deeper damage to the correct interface as it appears over time.
+- **Reproducible result storage** -- save a specimen manifest together with its detection results and reload it later, in the same session or a fresh one.
 
 ## Installation
 
@@ -72,6 +86,18 @@ src/deladect/         Core package
   utils.py            Image and geometry helpers
 docs/                 Documentation
 pyproject.toml        Packaging and dependency configuration
+```
+
+## Citing DelaDect
+
+A paper describing DelaDect's methodology is in preparation. Once it is
+published, its DOI will replace the "pending" badge above and be listed
+here together with the citation details. If you use DelaDect in your work
+in the meantime, please cite the repository directly:
+
+```text
+Pires, V. D. C. DelaDect: Optical Delamination Detection in Fiber-Reinforced
+Polymers. https://github.com/VascoPires/DelaDect
 ```
 
 ## Authors And License

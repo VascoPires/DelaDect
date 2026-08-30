@@ -3,8 +3,7 @@ How to store results
 
 Overview
 --------
-Everything DelaDect saves lives under a per-specimen results root,
-resolved by :meth:`~deladect.specimen.Specimen.results_dir`:
+Everything DelaDect saves lives under a per-specimen results root.
 
 .. code-block:: text
 
@@ -20,7 +19,12 @@ Config
 
    results/<name>/config/<name>_config.json
 
-Written by ``save_specimen``.
+``specimen.save_config()`` writes the manifest here (the path is also
+available as ``specimen.config_path()``, without saving). Nothing is
+written automatically -- mutations like ``add_ply`` and ``add_interface``
+are not persisted until you call it. ``save_specimen(specimen, path)`` does
+the same thing at an arbitrary path of your choosing, as used in
+:doc:`examples/delamination_multi_interface`.
 
 Cracks
 ------
@@ -77,32 +81,28 @@ Preprocessing cache
 Default ``cache_dirname="Preprocessor_cache"``. See :doc:`Image_pre_processing`
 for what each cached frame contains and how ``key`` is chosen.
 
-Generic NPZ helper
--------------------
-All of the above ultimately go through ``save_npz_bundle(data, path)``
-(``deladect.io.bundles``): it refuses an empty dict, coerces the filename to
-end in ``.npz``, and creates parent directories as needed.
-``load_npz_bundle(path)`` raises if the file is missing rather than
-returning an empty result.
 
 Save, reload, and experimental data
 ------------------------------------
 
-You can persist a specimen manifest and later reload the specimen together
-with its stored crack and delamination artefacts. Experimental data is also
-restored because ``strain_csv`` is part of the saved manifest. This supports
-reproducible workflows where analysis and later inspection happen in
-different Python sessions.
+You can save a specimen manifest and later reload the specimen together with
+its stored crack and delamination results. This is useful when you want to
+perform additional operations on a previously analyzed specimen without
+re-running detection.
 
-Run ``python examples/01_getting_started.py`` first, followed by:
+Saving is explicit -- nothing is written to disk automatically. Pass
+``save_specimen`` the path where the manifest should live, for example the
+``manifest`` path built in :doc:`examples/delamination_multi_interface`:
 
-.. code-block:: bash
+.. code-block:: python
 
-   python examples/03_save_reload_results.py
+   from deladect.io import save_specimen
 
-``01_getting_started.py`` builds its specimen from ``example_images/sample-1``
-with ``strain_csv=".../sample-1/experimental_data.csv"``, then saves the
-manifest via ``save_specimen``. The second example only reloads:
+   manifest = specimen.results_dir("config") / "specimen.json"
+   save_specimen(specimen, manifest)
+
+Reload the same ``manifest`` path later, in the same session or a fresh one,
+to get the specimen back together with everything under its results root:
 
 .. code-block:: python
 
@@ -117,33 +117,10 @@ manifest via ``save_specimen``. The second example only reloads:
    )
    bundles = load_stored_results(specimen, strict=True, verbose=True)
 
-Experimental data on reload
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``strict=True`` fails fast when a metadata path points to a missing file,
+rather than silently skipping it.
 
-``strain_csv`` round-trips through ``to_dict``/``from_dict`` like any other
-constructor argument, so ``specimen.experimental_data`` is populated again as
-soon as the specimen is reconstructed -- no separate reload step is needed:
+``strain_csv`` round-trips through the manifest like any other constructor
+argument, so ``specimen.experimental_data`` is populated again as soon as
+the specimen is reloaded -- no separate step needed.
 
-.. code-block:: python
-
-   print(specimen.experimental_data)
-
-Expected console messages
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-When ``verbose=True`` in ``load_specimen(..., load_results=True)``, messages
-are printed for discovered artefacts, for example:
-
-- ``Found cracks for ply 'ply_0' (...)``
-- ``Found edge/diffuse delamination artefacts for interface 'i0': ...``
-
-Strict mode
-~~~~~~~~~~~
-
-Use ``strict=True`` to fail fast when a metadata path points to a missing
-file, rather than silently skipping it.
-
-Related pages
--------------
-- :doc:`detection` for the detectors that produce these files.
-- :doc:`Image_pre_processing` for the preprocessing cache format.

@@ -20,7 +20,7 @@ detector runs, via
 .. note::
 
    This is separate from (and runs before) the per-slice filtering described
-   in :doc:`methodology`'s "Algorithm summary" (directional grey-opening,
+   in :doc:`edge_delamination`'s "Detection sequence" (directional grey-opening,
    unsharp mask, directional Gaussian smoothing) -- this page covers the
    stack-wide step that conditions raw frames, not a specific detector's own
    filter chain.
@@ -102,7 +102,7 @@ A fixed baseline works well as long as the baseline frame itself still looks
    frame and the baseline are now dark there, the ratio between them comes
    out close to 1 again -- as if nothing were there. The damage has
    effectively canceled itself out of its own reference frame. This
-   specifically breaks **multi-interface promotion** (``detect_edge_multi``),
+   specifically breaks **multi-interface delamination** (``detect_edge_multi``),
    which depends on still detecting *further* change inside a region that's
    already damaged.
 
@@ -127,9 +127,8 @@ auto-preprocessing path defaults to ``reference_window=10``,
    :align: center
 
 For a concrete, code-generated comparison of both modes on the same real
-specimen and frame -- rather than the schematic above -- see
-:doc:`examples/delamination_multi_interface`'s "Static vs. rolling-median
-preprocessing, on this data" section.
+specimen and frame -- rather than the schematic above -- see the
+normalization step in :doc:`examples/delamination_multi_interface`.
 
 API: ``preprocess_stack_to_disk``
 ----------------------------------
@@ -176,7 +175,7 @@ Choosing a mode in practice
       combined edge+diffuse on a single interface: the
       ``reference_mode="static"`` default is normally fine.
 
-   .. grid-item-card:: Multi-interface promotion
+   .. grid-item-card:: Multi-interface delamination
       :class-card: sd-border-warning
 
       Running :meth:`EdgeDetector.detect_edge_multi`: use

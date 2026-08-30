@@ -65,16 +65,3 @@ radius in the same way.
    :alt: Morphological closing with the disk footprint and newly filled pixels
    :width: 760
    :align: center
-
-Frame-to-frame latching
------------------------
-
-The current detection is combined with the previous latched mask using a
-cumulative OR.  Blue pixels were already detected, yellow pixels occur in
-both masks, and red pixels are newly added.  Consequently, previously
-detected delamination is retained even if it is absent from a later frame.
-
-.. image:: _static/image_operations/frame_latching.gif
-   :alt: Frame-to-frame latching with previous overlap and new delamination pixels
-   :width: 760
-   :align: center

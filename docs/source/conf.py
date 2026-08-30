@@ -55,6 +55,28 @@ html_context = {
 
 html_theme_options = {
     'github_url': 'https://github.com/VascoPires/DelaDect',
+    'icon_links': [
+        {
+            'name': 'Launch on Binder',
+            'url': 'https://mybinder.org/v2/gh/VascoPires/DelaDect/HEAD',
+            'icon': 'fa-solid fa-rocket',
+            'type': 'fontawesome',
+        },
+        {
+            'name': 'PyPI',
+            'url': 'https://pypi.org/project/deladect/',
+            'icon': 'fa-brands fa-python',
+            'type': 'fontawesome',
+        },
+        {
+            # TODO: replace with the DOI landing page once the paper is published,
+            # e.g. 'https://doi.org/10.xxxx/xxxxxxx'.
+            'name': 'Paper (DOI pending)',
+            'url': 'https://github.com/VascoPires/DelaDect#citing-deladect',
+            'icon': 'fa-solid fa-file-lines',
+            'type': 'fontawesome',
+        },
+    ],
     'collapse_navigation': True,
     'use_edit_page_button': True,
     'navigation_with_keys': False,

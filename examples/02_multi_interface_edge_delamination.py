@@ -1,4 +1,4 @@
-"""Edge-only delamination: single interface, then multi-interface promotion."""
+"""Edge-only delamination: single interface, then multi-interface delamination."""
 
 from pathlib import Path
 
@@ -25,7 +25,7 @@ def main() -> None:
     # Specimen is a symmetric [+30/-30/90]_s laminate. Plies are numbered from
     # the midplane outward, so "90/-30" -- the innermost interface -- is the
     # primary interface (delamination shows up there first); "-30/30" is the
-    # secondary interface, promoted once evidence persists beneath "90/-30".
+    # secondary interface, attributed once evidence persists beneath "90/-30".
     for index, orientation in enumerate((90.0, -30.0, 30.0)):
         specimen.add_ply(
             name=f"ply_{index}",
@@ -66,10 +66,10 @@ def main() -> None:
     print(f"Single-interface (90/-30) edge masks: {primary_only_masks_path}")
     print(f"Single-interface (90/-30) edge overlays: {primary_only_overlays}")
 
-    # 2. Multi-interface promotion across 90/-30 (primary) and -30/30
-    #    (secondary). The primary accumulation uses a static reference; the secondary
-    #    promotion pass uses a rolling-median reference so it stays sensitive
-    #    to change inside the already-established primary region.
+    # 2. Multi-interface delamination across 90/-30 (primary) and -30/30
+    #    (secondary). The primary accumulation uses a static reference; the
+    #    deeper-interface pass uses a rolling-median reference so it stays
+    #    sensitive to change inside the already-established primary region.
     primary_cache = detector.preprocess_stack_to_disk(
         specimen.image_stack_full,
         key="primary_static",
