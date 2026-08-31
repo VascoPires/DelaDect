@@ -30,11 +30,14 @@ DelaDect is a Python package for quantitative damage analysis in fiber-reinforce
 
 ## Highlights
 
-- **Crack detection** built on top of [CrackDect](https://github.com/mattdrvo/CrackDect), tracked frame-to-frame to give every crack a persistent identity.
-- **Diffuse delamination** detected locally around tracked cracks, comparing each neighborhood against its own baseline frame.
-- **Edge delamination** reconstructed from the specimen free edge, with directional or columnwise connectivity and frame-to-frame latching.
-- **Multi-interface delamination**, hierarchically attributing deeper damage to the correct interface as it appears over time.
-- **Reproducible result storage** -- save a specimen manifest together with its detection results and reload it later, in the same session or a fresh one.
+- Detects matrix cracks in image sequences using CrackDect.
+- Separates delamination connected to a free edge from diffuse damage around
+  tracked cracks.
+- Retains detected damage between frames and reports its area over time.
+- Supports the two-interface edge-delamination workflow used for laminates in
+  which the primary interface is known to develop first.
+- Saves masks, overlays, metrics, and the specimen configuration for later
+  inspection or reloading.
 
 ## Installation
 

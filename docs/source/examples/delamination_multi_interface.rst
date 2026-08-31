@@ -240,7 +240,7 @@ mask of the interface directly above it.
 ``secondary_params`` controls when new damage is attributed to the deeper interface:
 
 - ``secondary_start_frame`` is the only setting that currently changes the
-  result: frames at or before this index (here, index 2) produce no
+  result: frames before this index (here, index 2) produce no
   secondary output, which is useful when a specimen has a known dwell
   period before deeper damage can occur.
 - ``secondary_similarity_threshold`` and ``min_primary_frac_for_secondary``
@@ -249,7 +249,7 @@ mask of the interface directly above it.
 
 For the full attribution mechanics -- how a candidate is attributed to a
 deeper interface, and exactly what each ``secondary_params`` setting does and doesn't affect --
-see :doc:`../edge_delamination`. Saving ``manifest`` here lets this specimen
+see :doc:`../multi_interface_delamination`. Saving ``manifest`` here lets this specimen
 be reloaded later together with its stored results, as described in
 :doc:`../results_storage`.
 

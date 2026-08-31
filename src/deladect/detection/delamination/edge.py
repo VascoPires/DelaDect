@@ -756,9 +756,6 @@ class EdgeDetector:
             _lower_active = None
 
         for level_idx in range(1, len(interface_list)):
-            parent_upper = upper_rolling_levels[level_idx - 1]
-            parent_lower = lower_rolling_levels[level_idx - 1]
-
             upper_latched: List[np.ndarray] = []
             lower_latched: List[np.ndarray] = []
             upper_diag: List[Dict[str, Any]] = []
@@ -766,11 +763,14 @@ class EdgeDetector:
             acc_u = np.zeros_like(upper_mask_frames[0], dtype=bool)
             acc_l = np.zeros_like(lower_mask_frames[0], dtype=bool)
 
-            # Use established primary (delayed by ~rolling-median window) so the growing
-            # primary front is excluded: only ROLLING mask pixels inside settled primary
-            # area accumulate as secondary, catching the interior darkening event.
-            primary_upper = upper_levels[0]
-            primary_lower = lower_levels[0]
+            # Use the established mask of the level directly above (delayed by ~rolling-
+            # median window) so the growing front is excluded: only ROLLING mask pixels
+            # inside the settled parent-level area accumulate here, catching the interior
+            # darkening event. For level 1 the parent is the primary (level 0); for level
+            # 2+ the parent is the previous level's own accumulated attribution, so each
+            # deeper level is recursively gated by the level immediately above it.
+            primary_upper = upper_levels[level_idx - 1]
+            primary_lower = lower_levels[level_idx - 1]
             secondary_reference_params = _sec_edge_params or edge_params
             sec_ref_window = int(secondary_reference_params.get("reference_window", 7))
             _sec_start = multi_params.get("secondary_start_frame")
