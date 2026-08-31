@@ -11,7 +11,7 @@ This capability is edge-only: it is not available for diffuse delamination.
 Why interfaces need to be ordered
 ----------------------------------
 
-Consider a symmetric laminate such as ``[+30/-30/90]_s``. From a single
+Consider a symmetric laminate such as ``[+θ/-θ/90]_s``. From a single
 frame, DelaDect only sees a distribution of pixel intensity -- there is no
 way to tell, from one image alone, which physical interface a dark region
 belongs to. What *does* carry that information is the sequence of frames: if
@@ -19,28 +19,46 @@ damage tends to appear at one interface first and only later spreads to a
 deeper one, then watching *where new darkening shows up relative to what is
 already damaged* is enough to tell the interfaces apart.
 
-That is the whole idea behind multi-interface delamination: interfaces are
-given an explicit shallow-to-deep order, the first (primary) interface is
-detected exactly as in :doc:`edge_delamination`, and each deeper interface is
-only credited with damage that shows up *inside* the region its parent
-interface has already claimed.
+That is the idea behind multi-interface delamination: interfaces are given an
+explicit shallow-to-deep order, the first (primary) interface is detected
+exactly as in :doc:`edge_delamination`, and later darkening is tested inside
+an already established primary region.
+
+.. figure:: _static/multi_interface_delamination/interface_order.png
+   :alt: Ordered three-ply cross-section showing the primary 90/-theta interface before the secondary -theta/+theta interface
+   :width: 100%
+   :align: center
+
+   The interface order is specimen knowledge supplied to DelaDect. It cannot
+   be inferred from the intensity distribution in one image.
 
 .. note::
 
    This relies on an assumption the algorithm does not verify: that damage
-   at a given interface generally appears before damage at the interface
-   below it. This is often the case for laminates such as
+   at a given interface generally appears before damage at the next interface
+   in the supplied order. This is often the case for laminates such as
    :math:`[\pm \theta /90^\circ]_s` with one interface dominant in the
    initial stages of a mechanical test, but it is a property of the
    specimen and loading, not something DelaDect checks for you.
 
 :meth:`~deladect.detection.delamination.EdgeDetector.detect_edge_multi`
-extends the same primary edge algorithm from :doc:`edge_delamination` to a
-hierarchy of interfaces, ordered shallow to deep. The first (primary)
-interface accumulates exactly as described on that page. Each deeper
-interface is *attributed* from its parent: a pixel only becomes secondary
-damage once it is both (a) classified in a secondary binary pass and (b)
-already covered by the parent interface's established mask.
+extends the same primary edge algorithm from :doc:`edge_delamination` to an
+ordered interface list of any length. The first (primary) interface
+accumulates exactly as described on that page. Each deeper interface is
+attributed recursively: a pixel only becomes damage at level *n* once it is
+both (a) classified in the secondary pass and (b) already covered by the
+delayed mask established at level *n-1* -- level 2 gated by level 1, level 3
+by level 2, and so on.
+
+.. note:: One shared secondary-detection source across all deeper levels
+
+   ``secondary_cache_paths`` (and ``secondary_edge_params``/
+   ``secondary_params``) supply a single detection source and parameter set
+   used for the classification pass at *every* level beyond the primary --
+   there is no way to give the 3rd interface a different secondary cache or
+   parameters than the 2nd. Only the gating chain (which established mask a
+   candidate must fall inside) goes deeper per level; the underlying
+   candidate signal does not.
 
 Why two preprocessing caches
 ------------------------------
@@ -71,17 +89,29 @@ How a candidate is attributed to a deeper interface
 For each frame and each deeper level, the algorithm:
 
 1. Takes the secondary binary mask for that frame (from the rolling-median
-   cache pass, or the primary pass if no separate cache was given).
-2. Intersects it with the *parent* interface's latched mask, but read back
-   ``reference_window`` frames earlier (the same window used for the
-   rolling-median reference) -- an already-settled primary region rather than
-   its still-growing edge.
+   cache pass, or the primary pass if no separate cache was given). This
+   mask is the same for every level -- see the note above.
+2. Intersects it with the *parent* level's latched mask (the primary mask
+   for level 1, the previous level's own accumulated mask for level 2 and
+   deeper), read back ``reference_window`` frames earlier (the same window
+   used for the rolling-median reference) -- an already-settled parent
+   region rather than its still-growing edge.
 3. Keeps only pixels still connected to the free edge.
 4. OR-accumulates the result into that level's running mask, the same
    frame-to-frame latching used by the primary pass.
 
-``secondary_start_frame`` gates this off entirely: frames at or before the
-given index produce no secondary output for that level, which is useful when
+.. figure:: _static/multi_interface_delamination/secondary_attribution.png
+   :alt: Delayed parent mask intersected with a rolling-reference candidate, followed by edge connection and latching into the deeper-interface mask
+   :width: 100%
+   :align: center
+
+   Attribution at any depth. A rolling-reference candidate is eligible for a
+   given interface only inside the settled, delayed mask of the interface
+   directly above it; the intersection must remain connected to the specimen
+   edge and is then latched over time.
+
+``secondary_start_frame`` gates this off entirely: frames before the given
+index produce no secondary output for that level, which is useful when
 a specimen has a known dwell period before deeper damage can physically
 occur.
 

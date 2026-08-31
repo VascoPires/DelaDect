@@ -1,83 +1,81 @@
 Diffuse Delamination
 ====================
 
-Diffuse delamination is sought locally around tracked transverse cracks. The
-track supplies two things that an isolated crack detection cannot provide: a
-persistent identity and a baseline image from when that crack was first seen.
-The later neighborhood can then be compared with its own initial state.
+Diffuse delamination is assembled crack by crack. The virtual example below
+shows the idea without depending on a particular experiment. For each crack
+in the specimen, DelaDect creates a local delamination mask around that crack
+and places the mask back at the crack's position in the full image.
 
-.. image:: _static/delamination/diffuse_crack_tracking.gif
-   :alt: Crack tracking baseline normalization and diffuse delamination detection
-   :width: 760
+.. figure:: _static/delamination/diffuse_mask_assembly.png
+   :alt: Virtual specimen showing its cracks, one crack-local diffuse mask, and all local masks assembled into a full-specimen mask
+   :width: 100%
    :align: center
 
-Why crack tracking is needed
-----------------------------
+   Virtual example of the assembly. One crack produces one local mask.
+   Repeating this for every crack and combining the projected masks produces
+   a single specimen-sized mask.
 
-Crack detections are generated independently in every frame. Their ordering
-can change, endpoints can move slightly, and cracks may grow or disappear.
-The tracker assigns a persistent ID using four geometric cues:
+The full mask is the logical union of the individual crack masks. A pixel is
+therefore classified as diffuse delamination when it belongs to at least one
+projected crack-local mask.
 
-- center-to-center distance;
-- crack-angle difference;
-- bounding-box overlap; and
-- change in crack length.
+Running diffuse detection
+-------------------------
 
-Candidate assignments outside the distance or angle gates are rejected. The
-remaining assignments are sorted by cost and accepted one-to-one, so one
-detection cannot update several tracks. An unmatched detection starts a new
-track; an unmatched active track is terminated.
+Diffuse detection needs a configured specimen and interface, together with
+the cracks detected in each frame. The detector returns one assembled,
+full-frame mask per frame.
 
-The first detection of a track stores its baseline frame, segment, length, and
-bounding box. Later matched detections retain that original baseline while
-updating the track's latest geometry and history.
+.. code-block:: python
 
-Removing the initial crack state
---------------------------------
+   from deladect.detection import DelaminationDetector, crack_analysis
 
-For a matched track, the algorithm constructs a crack-aligned rectangular
-region around the **baseline segment**. ``diffuse_dx`` controls its width
-perpendicular to the crack and ``diffuse_dy`` extends it beyond the crack ends.
-Exactly the same affine geometry samples both the baseline and current frames.
+   cracks = crack_analysis(specimen, save_cracks=True)
+   detector = DelaminationDetector(specimen, interface)
 
-The normalized region is
+   diffuse_result = detector.diffuse.diffuse_delamination(
+       cracks=cracks,
+       save_overlays=True,
+       params={
+           "diffuse_dx": 40.0,
+           "diffuse_dy": 10.0,
+           "window_diffuse": (30, 30),
+       },
+       progress=True,
+   )
 
-.. math::
+   diffuse_masks = diffuse_result["masks"]
 
-   R = \operatorname{clip}\left(\frac{I_{current}}
-   {\max(I_{baseline}, 10^{-3})}, 0, 1\right).
+The parameter values are measured in pixels and should be matched to the
+image scale:
 
-This division is the initial-state removal:
+- ``diffuse_dx`` is the half-width of the local region perpendicular to a
+  crack.
+- ``diffuse_dy`` extends the local region beyond both crack ends.
+- ``window_diffuse`` sets the row-by-column feature scale used by the diffuse
+  detector.
 
-- an unchanged crack pixel might give ``75 / 75 = 1`` and disappears from the
-  dark-change image;
-- unchanged background similarly remains near ``1``;
-- a newly darkened neighborhood might give ``140 / 235 = 0.60`` and remains
-  available for diffuse classification.
+If the supplied crack coordinates refer to the full image rather than the
+specimen's middle-region image, pass ``crack_coordinate_space="full"`` to
+``diffuse_delamination``.
 
-The ratio is then passed through the diffuse max/min, sharpening, smoothing,
-scaling, thresholding, and binary-closing operations. Values in the dark tail
-become the local diffuse mask, which is projected from crack-aligned
-coordinates back into the full frame.
+Using the assembled masks
+-------------------------
 
-Vanishing cracks
-----------------
+Masks are Boolean arrays keyed by frame name. Their shape matches the full
+specimen image, so they can be displayed, measured, or saved directly.
 
-When a previously matched crack is no longer detected, its track terminates.
-The final segment still defines a neighborhood, and the current frame is
-compared with the stored baseline. This allows diffuse damage to be evaluated
-even when the visible crack itself has vanished into the damaged region.
+.. code-block:: python
 
-Why the method works
---------------------
+   import numpy as np
 
-The method is sensitive to *change around a particular crack*, rather than to
-the crack's absolute darkness. It works when image shift correction keeps the
-same physical pixels aligned and when the tracker preserves the correct crack
-identity. The geometric gates reduce accidental identity swaps, while the
-local ROI prevents unrelated dark regions elsewhere in the specimen from
-driving the classification.
+   frame_key = sorted(diffuse_masks)[-1]
+   mask = diffuse_masks[frame_key]
 
-See :doc:`detection` for the complete API and default parameter values, and
-:doc:`image_operations` for the individual filtering operations.
+   area_px = np.count_nonzero(mask)
+   area_mm2 = area_px / specimen.scale_px_mm**2
 
+   np.savez_compressed("diffuse_masks.npz", **diffuse_masks)
+
+See :class:`~deladect.detection.delamination.DiffuseDetector` for the complete
+method signature and optional settings.
