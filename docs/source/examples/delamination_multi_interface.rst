@@ -119,6 +119,19 @@ at the last sampled frame.
        reference_skip=2,
    )["cache_paths"]
 
+.. figure:: ../_static/examples/static_vs_rolling_median_preprocessing.png
+   :alt: Static vs rolling-median reference preprocessing compared on the same frame of Sample-3
+   :width: 100%
+   :align: center
+
+   Sample-3, frame 272. **(a)** the static baseline is fixed to the first
+   frame, so it never "absorbs" the delamination front. So the normalized
+   frame only shows one high-contrast band. **(b)** The
+   rolling-median baseline (window=7, skip=2) tracks recent frames, so it
+   partially absorbs the already-established front into the baseline itself.
+   This means that the normalized frame is now sensitive to the new damage
+   happening on a different layer (which lead to the darkening).
+
 
 2. Standalone edge delamination
 --------------------------------
@@ -205,19 +218,6 @@ mask of the interface directly above it.
 
    manifest = specimen.results_dir("config") / "specimen.json"
    save_specimen(specimen, manifest)
-
-.. figure:: ../_static/examples/static_vs_rolling_median_preprocessing.png
-   :alt: Static vs rolling-median reference preprocessing compared on the same frame of Sample-3
-   :width: 100%
-   :align: center
-
-   Sample-3, frame 272. **(a)** the static baseline is fixed to the first
-   frame, so it never "absorbs" the delamination front. So the normalized
-   frame only shows one high-contrast band. **(b)** The
-   rolling-median baseline (window=7, skip=2) tracks recent frames, so it
-   partially absorbs the already-established front into the baseline itself.
-   This means that the normalized frame is now sensitive to the new damage
-   happening on a different layer (which lead to the darkening).
 
 .. figure:: ../_static/examples/multi_interface_detection_outputs.png
    :alt: Standalone single-interface edge delamination compared with multi-interface delamination, frame 272
