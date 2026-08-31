@@ -21,14 +21,14 @@ detector runs, via
 
    This is separate from (and runs before) the per-slice filtering described
    in :doc:`edge_delamination`'s "Detection sequence" (directional grey-opening,
-   unsharp mask, directional Gaussian smoothing) -- this page covers the
+   unsharp mask, directional Gaussian smoothing). This page covers the
    stack-wide step that conditions raw frames, not a specific detector's own
    filter chain.
 
 Two mechanisms are applied per frame, in order:
 
-1. **History clamp** — suppresses transient bright noise/reflections.
-2. **Reference normalization** — a ratio against a baseline frame, so new
+1. **History clamp**: suppresses transient bright noise and reflections.
+2. **Reference normalization**: a ratio against a baseline frame, so new
    damage stands out relative to that baseline instead of absolute
    brightness.
 
@@ -37,7 +37,7 @@ Two mechanisms are applied per frame, in order:
 History clamp
 --------------
 A stray reflection or a speck of dust can make a pixel flash bright for a
-single frame and then go back to normal — that's noise, not damage, and it
+single frame and then go back to normal. That's noise, not damage, and it
 should be ignored. The history clamp does this by remembering, for every
 pixel, the darkest value it has *ever* reached so far, and forcing the
 current frame down to that darkest-so-far value: ``min(current_frame, history)``.
@@ -46,9 +46,9 @@ stayed that way across frames; a one-frame flicker gets overwritten by the
 next frame's clamp and disappears.
 
 This is on by default (``history_clamp=True``) and controlled by
-``history_mode`` (``"running"`` — remembers the darkest value over the
-*entire* stack so far — or a rolling window that only looks back
-``history_window_size`` frames).
+``history_mode``: ``"running"`` remembers the darkest value over the
+*entire* stack so far, while a rolling window only looks back
+``history_window_size`` frames.
 
 Reference normalization
 ------------------------
@@ -58,8 +58,8 @@ the other, pixel by pixel: ``current / baseline``. Where nothing has
 changed, that ratio is close to 1 (unchanged brightness); where the specimen
 has darkened relative to the baseline, the ratio drops below 1. Because it's
 a *ratio* rather than a raw brightness difference, slow, shared lighting
-drift between the current frame and the baseline cancels out automatically
--- what's left over is dominated by genuinely new, persistent darkening.
+drift between the current frame and the baseline cancels out automatically.
+What's left over is dominated by genuinely new, persistent darkening.
 
 .. image:: _static/normalization/frame_division_ratio.png
    :alt: Static reference normalization by frame division
@@ -76,22 +76,22 @@ clipped back into a normal ``0-255`` image range:
    ratio = np.clip(frame_float / denominator, 0.0, 1.0)
    processed = (ratio * 255.0).astype(np.uint8)
 
-The only real question is *which frame counts as the baseline* --
+The only real question is *which frame counts as the baseline*, and
 ``reference_mode`` selects that:
 
-- ``"static"`` (default) — one fixed early frame, reused for the whole
+- ``"static"`` (default): one fixed early frame, reused for the whole
   stack. Standard for :meth:`EdgeDetector.detect_primary`,
   :meth:`DelaminationDetector.detect_both_delaminations`, and
   :meth:`DiffuseDetector.diffuse_delamination`.
-- ``"rolling_median"`` — an adaptive baseline: the median of a trailing
-  window of recent frames, ``[start_idx, end_idx)`` where
+- ``"rolling_median"``: an adaptive baseline built from the median of a
+  trailing window of recent frames, ``[start_idx, end_idx)`` where
   ``end_idx = idx - reference_skip`` and ``start_idx = end_idx - reference_window``.
   Reserved for :meth:`EdgeDetector.detect_edge_multi`.
 
 Static-reference limits and the rolling alternative
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 A fixed baseline works well as long as the baseline frame itself still looks
-"healthy" -- undamaged, or close to it.
+"healthy" (undamaged, or close to it).
 
 .. warning::
 
@@ -100,7 +100,7 @@ A fixed baseline works well as long as the baseline frame itself still looks
    the past, by the current frame the specimen may already be damaged in
    the *same* spot the baseline was taken from. Since both the current
    frame and the baseline are now dark there, the ratio between them comes
-   out close to 1 again -- as if nothing were there. The damage has
+   out close to 1 again, as if nothing were there. The damage has
    effectively canceled itself out of its own reference frame. This
    specifically breaks **multi-interface delamination** (``detect_edge_multi``),
    which depends on still detecting *further* change inside a region that's
@@ -127,7 +127,7 @@ auto-preprocessing path defaults to ``reference_window=10``,
    :align: center
 
 For a concrete, code-generated comparison of both modes on the same real
-specimen and frame -- rather than the schematic above -- see the
+specimen and frame, rather than the schematic above, see the
 normalization step in :doc:`examples/delamination_multi_interface`.
 
 API: ``preprocess_stack_to_disk``
@@ -151,12 +151,12 @@ Returns ``{"cache_paths": [...]}``, one path per processed frame. Each
 cached ``.npz`` lives at ``<results>/<cache_dirname>/<key>/preprocess_%04d.npz``
 and stores:
 
-- ``processed`` — the normalized frame
-- ``baseline`` — the baseline frame used for that index
-- ``ref_start_idx``, ``ref_end_idx``, ``ref_anchor_idx`` — the resolved
+- ``processed``: the normalized frame
+- ``baseline``: the baseline frame used for that index
+- ``ref_start_idx``, ``ref_end_idx``, ``ref_anchor_idx``: the resolved
   reference window bounds
 - ``reference_mode``, ``reference_window``, ``reference_skip``,
-  ``history_mode``, ``history_window_size`` — the settings used, so the
+  ``history_mode``, ``history_window_size``: the settings used, so the
   cache is self-describing
 
 A manifest file in the same cache directory records the run's settings for
@@ -185,7 +185,6 @@ Choosing a mode in practice
 .. note::
 
    If diffuse masks look too broad (rectangular ROI-like shapes), see the
-   troubleshooting order in :doc:`detection`'s "Troubleshooting" section --
+   troubleshooting order in :doc:`detection`'s "Troubleshooting" section.
    ``reference_skip`` is the first knob to try there too.
-
 
