@@ -50,6 +50,26 @@ This is on by default (``history_clamp=True``) and controlled by
 *entire* stack so far, while a rolling window only looks back
 ``history_window_size`` frames.
 
+This is the same noise-suppression idea used by Bender et al. [Bender2021]_
+for crack detection in white-light imaging: without a clamp, each frame's
+noise level stays flat forever; with the running clamp, it decays and
+plateaus as more frames accumulate and pin down each pixel's true darkest
+value. The figure below shows this for DelaDect's own
+``apply_minimum_history`` on a small synthetic noisy stack (not a real
+specimen, fixed round blobs standing in for persistent damage): the top two
+rows are an unclamped vs. history-clamped image-strip comparison across the
+stack, the clamped row visibly cleaning up while the unclamped row stays
+equally noisy; the bottom-left panel is the background pixel-value
+histogram at a few points in the stack, narrowing and shifting down as
+history accumulates; the bottom-right panel tracks the pixel standard
+deviation across the whole stack, flat without the clamp and converging
+with it.
+
+.. image:: _static/normalization/history_clamp_noise.png
+   :alt: An unclamped vs. history-clamped image strip across the stack, plus pixel-value histograms narrowing as history accumulates and a standard-deviation-vs-frame plot converging with the history clamp but staying flat without it
+   :width: 720
+   :align: center
+
 Reference normalization
 ------------------------
 After the history clamp, each frame is compared to a **baseline** (a
@@ -147,6 +167,9 @@ API: ``preprocess_stack_to_disk``
        progress=False,
    )
 
+``history_mode="running"`` (above) is the history clamp described earlier
+under "History clamp".
+
 Returns ``{"cache_paths": [...]}``, one path per processed frame. Each
 cached ``.npz`` lives at ``<results>/<cache_dirname>/<key>/preprocess_%04d.npz``
 and stores:
@@ -187,4 +210,13 @@ Choosing a mode in practice
    If diffuse masks look too broad (rectangular ROI-like shapes), see the
    troubleshooting order in :doc:`detection`'s "Troubleshooting" section.
    ``reference_skip`` is the first knob to try there too.
+
+References
+----------
+
+.. [Bender2021] Bender, J. J., Bak, B. L. V., Jensen, S. M., & Lindgaard, E.
+   (2021). Effect of variable amplitude block loading on intralaminar crack
+   initiation and propagation in multidirectional GFRP laminate.
+   *Composites Part B: Engineering*, 217, 108905.
+   `<https://doi.org/10.1016/j.compositesb.2021.108905>`_
 
