@@ -20,11 +20,10 @@ Config
    results/<name>/config/<name>_config.json
 
 ``specimen.save_config()`` writes the manifest here (the path is also
-available as ``specimen.config_path()``, without saving). Nothing is
-written automatically -- mutations like ``add_ply`` and ``add_interface``
-are not persisted until you call it. ``save_specimen(specimen, path)`` does
-the same thing at an arbitrary path of your choosing, as used in
-:doc:`examples/delamination_multi_interface`.
+available as ``specimen.config_path()``, without saving). Mutations like
+``add_ply`` and ``add_interface`` are not persisted until you call it.
+``save_specimen(specimen, path)`` does the same thing at an arbitrary path
+of your choosing, as used in :doc:`examples/delamination_multi_interface`.
 
 Cracks
 ------
@@ -86,13 +85,11 @@ Save, reload, and experimental data
 ------------------------------------
 
 You can save a specimen manifest and later reload the specimen together with
-its stored crack and delamination results. This is useful when you want to
-perform additional operations on a previously analyzed specimen without
-re-running detection.
+its stored crack and delamination results, to work on a previously analyzed
+specimen without re-running detection.
 
-Saving is explicit -- nothing is written to disk automatically. Pass
-``save_specimen`` the path where the manifest should live, for example the
-``manifest`` path built in :doc:`examples/delamination_multi_interface`:
+Pass ``save_specimen`` the path where the manifest should live, for example
+the ``manifest`` path built in :doc:`examples/delamination_multi_interface`:
 
 .. code-block:: python
 
@@ -122,5 +119,5 @@ rather than silently skipping it.
 
 ``strain_csv`` round-trips through the manifest like any other constructor
 argument, so ``specimen.experimental_data`` is populated again as soon as
-the specimen is reloaded -- no separate step needed.
+the specimen is reloaded. No separate step needed.
 

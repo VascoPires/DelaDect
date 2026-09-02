@@ -4,14 +4,19 @@ Normalization
 Overview
 --------
 A specimen is photographed repeatedly over the course of a test, and those
-raw frames are noisy in ways that have nothing to do with damage: lighting
-drifts slightly between shots, reflections flicker on and off, and the
-undamaged material never looks perfectly uniform to begin with. If a
+raw frames are affected by noise such as lighting drifts slightly between shots, 
+shadows, reflections flicker on and off, and the
+undamaged material never looks perfectly uniform to begin with. So, if a
 detector just looked at how *dark* a pixel is, it couldn't tell "this got
 darker because it delaminated" apart from "this got darker because the
-lighting changed." Normalization solves that: it compares every frame
-against a reference so only genuinely new, persistent darkening comes
-through.
+lighting changed." This page shows how the pre-processing
+(or normalization) in DelaDect solves that. There are two mechanisms that
+help negate the already mentioned issues which are applied in order:
+
+1. **History clamp**: suppresses transient bright noise and reflections.
+2. **Reference normalization**: a ratio against a baseline frame, so new
+   damage stands out relative to that baseline instead of absolute
+   brightness.
 
 DelaDect does this once per image stack, before any crack or delamination
 detector runs, via
@@ -19,45 +24,38 @@ detector runs, via
 
 .. note::
 
-   This is separate from (and runs before) the per-slice filtering described
-   in :doc:`edge_delamination`'s "Detection sequence" (directional grey-opening,
-   unsharp mask, directional Gaussian smoothing) -- this page covers the
-   stack-wide step that conditions raw frames, not a specific detector's own
-   filter chain.
-
-Two mechanisms are applied per frame, in order:
-
-1. **History clamp** — suppresses transient bright noise/reflections.
-2. **Reference normalization** — a ratio against a baseline frame, so new
-   damage stands out relative to that baseline instead of absolute
-   brightness.
+   This is separate from (and runs before) the per-slice filtering used by
+   the detectors themselves. See :doc:`methodology`'s "Detection
+   sequence" for an example (directional grey-opening, unsharp mask,
+   directional Gaussian smoothing, shown pixel-by-pixel in
+   :doc:`image_operations`). This page covers the stack-wide step that
+   conditions raw frames before any detector runs.
 
 .. currentmodule:: deladect.detection.delamination
 
 History clamp
 --------------
 A stray reflection or a speck of dust can make a pixel flash bright for a
-single frame and then go back to normal — that's noise, not damage, and it
+single frame and then go back to normal. That's noise and it
 should be ignored. The history clamp does this by remembering, for every
 pixel, the darkest value it has *ever* reached so far, and forcing the
 current frame down to that darkest-so-far value: ``min(current_frame, history)``.
-This suppresses transient bright excursions. In ``"running"`` mode, a dark
-excursion is retained; use a rolling history when old dark values should
-eventually leave the reference.
+This suppresses transient bright excursions. A pixel only stays dark in the output once it has actually gone dark and stayed that way across frames. In ``\"running\"`` mode, a dark excursion is retained; use a rolling history when old dark values should eventually leave the reference.
 
 This is on by default (``history_clamp=True``) and controlled by
-``history_mode`` (``"running"`` — remembers the darkest value over the
-*entire* stack so far — or a rolling window that only looks back
-``history_window_size`` frames).
+``history_mode``: ``"running"`` remembers the darkest value over the
+*entire* stack so far, while a rolling window only looks back
+``history_window_size`` frames. The second one would only be needed
+in very specific conditions where very obvious shadows show up (from a hand
+or some other factor) and the user doesn't wish to keep a full history
+of the ImageStack. Nevertheless, for most cases, the full history clamp
+is the most suitable.
 
-This is the same noise-suppression idea used by Bender et al. [Bender2021]_
-for crack detection in white-light imaging. Rather than reducing the effect
-to one standard deviation, the figure tracks the background median and its
-10th--90th percentile interval. This shows both consequences of the running
-minimum: the distribution becomes narrower and its centre shifts towards
-darker values as history accumulates. The figure uses DelaDect's own
-``apply_minimum_history`` on a small synthetic noisy stack (not a real
-specimen).
+Bender et al. [Bender2021]_ use the same idea for crack detection in white-light imaging: without a clamp, per-frame noise stays flat forever while with the running clamp, it plateaus as history accumulates.
+
+Rather than reducing the effect to one standard deviation, the figure tracks the background median and its 10th--90th percentile interval. This shows both consequences of the running minimum: the distribution becomes narrower and its centre shifts towards darker values as history accumulates.
+
+The figure below shows this on a small synthetic image stack with noise, using DelaDect's own ``apply_minimum_history``: unclamped vs. clamped image. It is also seen that the background pixel-value histograms get narrower and shift to the darker side over time.
 
 .. figure:: _static/normalization/history_clamp_noise.png
    :alt: Unclamped and history-clamped image strips, background pixel-value histograms, and a plot of the background median with its 10th-to-90th-percentile interval over time
@@ -81,20 +79,17 @@ Reference normalization
 After the history clamp, each frame is compared to a **baseline** (a
 reference image of what the specimen looked like before) by dividing one by
 the other, pixel by pixel: ``current / baseline``. Where nothing has
-changed, that ratio is close to 1 (unchanged brightness); where the specimen
-has darkened relative to the baseline, the ratio drops below 1. Because it's
-a *ratio* rather than a raw brightness difference, slow, shared lighting
-drift between the current frame and the baseline cancels out automatically
--- what's left over is dominated by genuinely new, persistent darkening.
+changed, that ratio is close to 1 (unchanged brightness), where the specimen
+has darkened relative to the baseline, the ratio drops below 1.
 
 .. image:: _static/normalization/frame_division_ratio.png
    :alt: Static reference normalization by frame division
    :width: 960
    :align: center
 
-In code (:func:`_normalize_reference_frame`, implementation detail), the
-same idea with a small safeguard against dividing by zero and the ratio
-clipped back into a normal ``0-255`` image range:
+This idea is done by :func:`_normalize_reference_frame` 
+(with a safeguard against dividing by zero) and the ratio clipped
+back to ``0-255``:
 
 .. code-block:: python
 
@@ -102,59 +97,49 @@ clipped back into a normal ``0-255`` image range:
    ratio = np.clip(frame_float / denominator, 0.0, 1.0)
    processed = (ratio * 255.0).astype(np.uint8)
 
-The only real question is *which frame counts as the baseline* --
-``reference_mode`` selects that:
+However the most important decision is
+ *which frame counts as the baseline* since damage is compared
+ to that baseline. This can be selected by choosing a ``reference_mode``:
 
-- ``"static"`` (default) — one fixed early frame, reused for the whole
+- ``"static"`` (default): one fixed first frame, reused for the whole
   stack. Standard for :meth:`EdgeDetector.detect_primary`,
   :meth:`DelaminationDetector.detect_both_delaminations`, and
-  :meth:`DiffuseDetector.diffuse_delamination`.
-- ``"rolling_median"`` — an adaptive baseline: the median of a trailing
+  :meth:`DiffuseDetector.diffuse_delamination`. It is fairly robust
+  since the background and initial damage is removed from the image
+  and only new damage shows up as dark pixels.
+- ``"rolling_median"``: an adaptive baseline built from the median of a
   window of recent frames, ``[start_idx, end_idx)`` where
   ``end_idx = idx - reference_skip`` and ``start_idx = end_idx - reference_window``.
-  Reserved for :meth:`EdgeDetector.detect_edge_multi`.
+  This method is mandatory :meth:`EdgeDetector.detect_edge_multi`, 
+  however it can also be selected for one interface delamination.
 
 Static-reference limits and the rolling alternative
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 A fixed baseline works well as long as the baseline frame itself still looks
-"healthy" -- undamaged, or close to it.
+"healthy" (undamaged, or close to it).
 
 .. warning::
 
-   **Self-canceling reference behavior.** Late in a test, the "healthy
-   baseline" assumption stops being true: if the baseline frame is far in
-   the past, by the current frame the specimen may already be damaged in
-   the *same* spot the baseline was taken from. Since both the current
-   frame and the baseline are now dark there, the ratio between them comes
-   out close to 1 again -- as if nothing were there. The damage has
-   effectively canceled itself out of its own reference frame. This
-   specifically breaks **multi-interface delamination** (``detect_edge_multi``),
-   which depends on still detecting *further* change inside a region that's
-   already damaged.
+   A static baseline works in the majority of cases, however, as reported
+   by Olesen et al. [Olesen2024]_, using a more recent baseline (rolling-median)
+   can assist with better damage recognition, especially when the 
+   specimens become severely damaged.
 
-The fix is to stop pinning the baseline to one fixed frame in the past and
-instead let it track close to "now": ``reference_mode="rolling_median"``
-uses the pixelwise median of several recent frames as the baseline, so it
-keeps up with the specimen instead of getting left behind. Recommended
-settings for ``detect_edge_multi``:
-
-- ``reference_mode="rolling_median"``
-- ``reference_skip >= 1``
+``reference_mode="rolling_median"`` uses the pixelwise median of several
+recent frames instead, so the baseline stays current. 
 
 With ``reference_window=1`` this behaves as a simple lagged single-frame
 reference: ``reference_skip=0`` uses frame ``n-1`` as baseline,
-``reference_skip=1`` uses ``n-2``, and so on. ``detect_edge_multi``'s
-auto-preprocessing path defaults to ``reference_window=10``,
-``reference_skip=1`` when neither is supplied.
+``reference_skip=1`` uses ``n-2``, and so on. 
 
 .. image:: _static/normalization/rolling_median_reference.png
    :alt: Rolling median reference normalization from previous frames
    :width: 960
    :align: center
 
-For a concrete, code-generated comparison of both modes on the same real
-specimen and frame -- rather than the schematic above -- see the
-normalization step in :doc:`examples/delamination_multi_interface`.
+For a concrete comparison of both modes on a real specimen and frame,
+rather than the schematic above, see the normalization step in
+:doc:`examples/delamination_multi_interface`.
 
 API: ``preprocess_stack_to_disk``
 ----------------------------------
@@ -173,49 +158,6 @@ API: ``preprocess_stack_to_disk``
        progress=False,
    )
 
-``history_mode="running"`` (above) is the history clamp described earlier
-under "History clamp".
-
-Returns ``{"cache_paths": [...]}``, one path per processed frame. Each
-cached ``.npz`` lives at ``<results>/<cache_dirname>/<key>/preprocess_%04d.npz``
-and stores:
-
-- ``processed`` — the normalized frame
-- ``baseline`` — the baseline frame used for that index
-- ``ref_start_idx``, ``ref_end_idx``, ``ref_anchor_idx`` — the resolved
-  reference window bounds
-- ``reference_mode``, ``reference_window``, ``reference_skip``,
-  ``history_mode``, ``history_window_size`` — the settings used, so the
-  cache is self-describing
-
-A manifest file in the same cache directory records the run's settings for
-reuse across detectors.
-
-Choosing a mode in practice
------------------------------
-
-.. grid:: 1 1 2 2
-   :gutter: 2
-
-   .. grid-item-card:: Single interface
-      :class-card: sd-border-success
-
-      Running :meth:`EdgeDetector.detect_primary`, diffuse detection, or
-      combined edge+diffuse on a single interface: the
-      ``reference_mode="static"`` default is normally fine.
-
-   .. grid-item-card:: Multi-interface delamination
-      :class-card: sd-border-warning
-
-      Running :meth:`EdgeDetector.detect_edge_multi`: use
-      ``reference_mode="rolling_median"`` with ``reference_skip >= 1``, per
-      the self-canceling-reference warning above.
-
-.. note::
-
-   If diffuse masks look too broad (rectangular ROI-like shapes), see the
-   troubleshooting order in :doc:`detection`'s "Troubleshooting" section --
-   ``reference_skip`` is the first knob to try there too.
 
 References
 ----------
@@ -225,3 +167,8 @@ References
    initiation and propagation in multidirectional GFRP laminate.
    *Composites Part B: Engineering*, 217, 108905.
    `<https://doi.org/10.1016/j.compositesb.2021.108905>`_
+.. [Olesen2024] Olesen, A. M., Bak, B. L. V., Bender, J. J., & Lindgaard, E.
+   (2024). MatrixCraCS: Automated tracking of matrix crack development in
+   GFRP laminates undergoing large tensile strains.
+   *Composites Science and Technology*, 253, 110638.
+   `<https://doi.org/10.1016/j.compscitech.2024.110638>`_

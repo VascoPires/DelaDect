@@ -255,7 +255,7 @@ be reloaded later together with its stored results, as described in
 
 .. _multi-interface-3d:
 
-4. Out30-p1, in 3D
+The specimen in 3D
 --------------------
 
 A good way to visualize the results is through a 3D visualization tool such as PyVista. Here
