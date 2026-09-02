@@ -40,7 +40,8 @@ single frame and then go back to normal. That's noise and it
 should be ignored. The history clamp does this by remembering, for every
 pixel, the darkest value it has *ever* reached so far, and forcing the
 current frame down to that darkest-so-far value: ``min(current_frame, history)``.
-This suppresses transient bright excursions. A pixel only stays dark in the output once it has actually gone dark and stayed that way across frames. In ``\"running\"`` mode, a dark excursion is retained; use a rolling history when old dark values should eventually leave the reference.
+A pixel only stays dark in the output once it has *actually* gone dark and
+stayed that way across frames. 
 
 This is on by default (``history_clamp=True``) and controlled by
 ``history_mode``: ``"running"`` remembers the darkest value over the
@@ -51,28 +52,19 @@ or some other factor) and the user doesn't wish to keep a full history
 of the ImageStack. Nevertheless, for most cases, the full history clamp
 is the most suitable.
 
-Bender et al. [Bender2021]_ use the same idea for crack detection in white-light imaging: without a clamp, per-frame noise stays flat forever while with the running clamp, it plateaus as history accumulates.
+Bender et al. [Bender2021]_ use the same idea for crack detection in
+white-light imaging: without a clamp, per-frame noise stays flat forever while
+with the running clamp, it plateaus as history accumulates.
 
-Rather than reducing the effect to one standard deviation, the figure tracks the background median and its 10th--90th percentile interval. This shows both consequences of the running minimum: the distribution becomes narrower and its centre shifts towards darker values as history accumulates.
+The figure below shows this on a small synthetic image stack with noise, using
+DelaDect's own ``apply_minimum_history``: unclamped vs. clamped image.
+It is also seen the background pixel-value histograms 
+getting narrower and shifting to the darker side over time. 
 
-The figure below shows this on a small synthetic image stack with noise, using DelaDect's own ``apply_minimum_history``: unclamped vs. clamped image. It is also seen that the background pixel-value histograms get narrower and shift to the darker side over time.
-
-.. figure:: _static/normalization/history_clamp_noise.png
-   :alt: Unclamped and history-clamped image strips, background pixel-value histograms, and a plot of the background median with its 10th-to-90th-percentile interval over time
-   :width: 960
+.. image:: _static/normalization/history_clamp_noise.png
+   :alt: An unclamped vs. history-clamped image strip across the stack, plus pixel-value histograms narrowing as history accumulates and a plot of the background median with its 10th-to-90th-percentile interval, flat without the clamp and converging with it
+   :width: 720
    :align: center
-
-   Synthetic noisy frames with three fixed dark blobs standing in for
-   persistent damage, sampled at stack positions 0, 4, 9, 16, and 24 (left
-   to right in both rows). **Top row:** unclamped -- equally noisy at every
-   position. **Bottom row:** the same positions after ``apply_minimum_history``
-   (``mode="running"``), visibly cleaning up from left to right as more
-   history accumulates. **Bottom-left:** background pixel-value histogram at
-   a few of those positions, narrowing and shifting down with more history.
-   **Bottom-right:** background median (line) and 10th--90th percentile
-   interval (shaded band). The unclamped distribution remains broadly
-   stable, while the running clamp narrows the interval and shifts its
-   median downwards.
 
 Reference normalization
 ------------------------
@@ -167,8 +159,10 @@ References
    initiation and propagation in multidirectional GFRP laminate.
    *Composites Part B: Engineering*, 217, 108905.
    `<https://doi.org/10.1016/j.compositesb.2021.108905>`_
+
 .. [Olesen2024] Olesen, A. M., Bak, B. L. V., Bender, J. J., & Lindgaard, E.
    (2024). MatrixCraCS: Automated tracking of matrix crack development in
    GFRP laminates undergoing large tensile strains.
    *Composites Science and Technology*, 253, 110638.
    `<https://doi.org/10.1016/j.compscitech.2024.110638>`_
+
