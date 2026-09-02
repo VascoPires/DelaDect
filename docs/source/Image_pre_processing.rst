@@ -41,9 +41,9 @@ single frame and then go back to normal — that's noise, not damage, and it
 should be ignored. The history clamp does this by remembering, for every
 pixel, the darkest value it has *ever* reached so far, and forcing the
 current frame down to that darkest-so-far value: ``min(current_frame, history)``.
-A pixel only stays dark in the output once it has *actually* gone dark and
-stayed that way across frames; a one-frame flicker gets overwritten by the
-next frame's clamp and disappears.
+This suppresses transient bright excursions. In ``"running"`` mode, a dark
+excursion is retained; use a rolling history when old dark values should
+eventually leave the reference.
 
 This is on by default (``history_clamp=True``) and controlled by
 ``history_mode`` (``"running"`` — remembers the darkest value over the
@@ -51,24 +51,30 @@ This is on by default (``history_clamp=True``) and controlled by
 ``history_window_size`` frames).
 
 This is the same noise-suppression idea used by Bender et al. [Bender2021]_
-for crack detection in white-light imaging: without a clamp, each frame's
-noise level stays flat forever; with the running clamp, it decays and
-plateaus as more frames accumulate and pin down each pixel's true darkest
-value. The figure below shows this for DelaDect's own
+for crack detection in white-light imaging. Rather than reducing the effect
+to one standard deviation, the figure tracks the background median and its
+10th--90th percentile interval. This shows both consequences of the running
+minimum: the distribution becomes narrower and its centre shifts towards
+darker values as history accumulates. The figure uses DelaDect's own
 ``apply_minimum_history`` on a small synthetic noisy stack (not a real
-specimen, fixed round blobs standing in for persistent damage): the top two
-rows are an unclamped vs. history-clamped image-strip comparison across the
-stack, the clamped row visibly cleaning up while the unclamped row stays
-equally noisy; the bottom-left panel is the background pixel-value
-histogram at a few points in the stack, narrowing and shifting down as
-history accumulates; the bottom-right panel tracks the pixel standard
-deviation across the whole stack, flat without the clamp and converging
-with it.
+specimen).
 
-.. image:: _static/normalization/history_clamp_noise.png
-   :alt: An unclamped vs. history-clamped image strip across the stack, plus pixel-value histograms narrowing as history accumulates and a standard-deviation-vs-frame plot converging with the history clamp but staying flat without it
-   :width: 720
+.. figure:: _static/normalization/history_clamp_noise.png
+   :alt: Unclamped and history-clamped image strips, background pixel-value histograms, and a plot of the background median with its 10th-to-90th-percentile interval over time
+   :width: 960
    :align: center
+
+   Synthetic noisy frames with three fixed dark blobs standing in for
+   persistent damage, sampled at stack positions 0, 4, 9, 16, and 24 (left
+   to right in both rows). **Top row:** unclamped -- equally noisy at every
+   position. **Bottom row:** the same positions after ``apply_minimum_history``
+   (``mode="running"``), visibly cleaning up from left to right as more
+   history accumulates. **Bottom-left:** background pixel-value histogram at
+   a few of those positions, narrowing and shifting down with more history.
+   **Bottom-right:** background median (line) and 10th--90th percentile
+   interval (shaded band). The unclamped distribution remains broadly
+   stable, while the running clamp narrows the interval and shifts its
+   median downwards.
 
 Reference normalization
 ------------------------
@@ -219,4 +225,3 @@ References
    initiation and propagation in multidirectional GFRP laminate.
    *Composites Part B: Engineering*, 217, 108905.
    `<https://doi.org/10.1016/j.compositesb.2021.108905>`_
-
