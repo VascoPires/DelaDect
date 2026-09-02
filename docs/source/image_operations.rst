@@ -1,9 +1,8 @@
 Image Operations
 ================
 
-The animations below use one synthetic image with oversized pixels.  The same
-delamination band is carried through every operation so that each change can
-be followed directly.
+This page serves as an explanation for the image operations used
+in the delamination detection.
 
 Directional max/min filtering
 -----------------------------

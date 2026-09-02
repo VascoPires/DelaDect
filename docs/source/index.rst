@@ -64,8 +64,8 @@ Documentation overview
 ----------------------
 
 The documentation is divided into three sections. **Examples** contains
-step-by-step workflows. **User Guide** follows the analysis pipeline from image
-loading through detection and result storage. **Reference** collects the
+step-by-step examples of some analysis. **User Guide** follows the 
+analysis pipeline from image loading to detection. **Reference** collects the
 callable classes, functions, and their default parameter values.
 
 There is also a binder notebooks available in this repository to run the examples without installing DelaDect. 
@@ -104,9 +104,6 @@ You can access it at
    :hidden:
 
 
-
-Project Information
--------------------
 
 Authors
 ~~~~~~~

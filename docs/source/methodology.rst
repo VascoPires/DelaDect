@@ -45,6 +45,14 @@ DelaDect distinguishes two delamination modes, each documented on its own page:
    diffuse_delamination
    multi_interface_delamination
 
+Detection sequence
+-------------------
+
+For each frame, edge detection applies directional grey-opening, unsharp
+masking, and directional Gaussian smoothing before thresholding. See
+:doc:`edge_delamination` for the full step-by-step sequence, and
+:doc:`image_operations` for these operations shown pixel-by-pixel.
+
 Combining the two
 ------------------
 
@@ -57,3 +65,4 @@ See also
 --------
 
 - :doc:`detection` for the callable API and default parameter values.
+- :doc:`image_operations` for the pixel-scale filtering steps behind edge detection.

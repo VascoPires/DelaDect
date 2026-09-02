@@ -9,17 +9,10 @@ Detection sequence
 ------------------
 
 For each frame, :meth:`deladect.detection.delamination.EdgeDetector.detect_primary`
-performs the following operations:
-
-1. directional maximum and minimum filtering;
-2. unsharp masking and directional Gaussian smoothing;
-3. constant scaling and thresholding;
-4. morphological closing of the binary candidate mask;
-5. directional reconstruction from a shallow free-edge seed; and
-6. frame-to-frame latching.
-
-The pixel-scale versions of these operations are shown on the
-:doc:`image_operations` page.
+applies filters, unsharp masking, directional Gaussian
+smoothing, constant scaling, thresholding, and morphological closing,
+shown pixel-by-pixel on the :doc:`image_operations` page. Free-edge
+reconstruction and frame-to-frame accumulation follow, described below.
 
 Free-edge reconstruction
 ------------------------
