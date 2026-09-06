@@ -2,34 +2,32 @@ Edge Delamination
 =================
 
 Edge delamination is damage that remains connected to a specimen free edge.
-The upper and lower specimen halves are processed independently; the lower
-half is flipped so that the relevant free edge is row zero in both cases.
+For this, the image is split into upper and lower specimen halves (or those regions
+are provided by the user) and each one is processed independently. 
 
 Detection sequence
 ------------------
 
 For each frame, :meth:`deladect.detection.delamination.EdgeDetector.detect_primary`
 applies filters, unsharp masking, directional Gaussian
-smoothing, constant scaling, thresholding, and morphological closing,
-shown pixel-by-pixel on the :doc:`image_operations` page. Free-edge
-reconstruction and frame-to-frame accumulation follow, described below.
+smoothing, constant scaling, thresholding, and morphological closing (see
+the workflow figure in :doc:`methodology`). After those operations the free edge
+reconstruction is done which ensures that the delamination front is always
+connected to the edge.
 
 Free-edge reconstruction
 ------------------------
 
-Thresholding alone can produce isolated dark regions away from the edge.
-Both reconstruction modes reject isolated regions. ``"directional"`` accepts
-a candidate when the preceding row contains an accepted pixel within the
-configured horizontal drift range. The drift is a tolerance: a value of three
-permits support from any accepted pixel within ``+-3`` columns.
-``"columnwise"`` is stricter: only the pixel directly above in the same column
-can provide support. Empty rows cannot be jumped in either mode. The removed
-``legacy_flood`` mode is no longer available.
+Thresholding can produce masks that are not
+connected to the edge. Both reconstruction modes remove these
+regions. In `"directional"` mode, a pixel is accepted if the
+previous row contains an accepted pixel within the specified
+horizontal drift range. For example, a drift of three allows
+a shift of up to `+-3` columns. In `"columnwise"` mode, the
+connection must be in the same column. Neither mode can skip
+empty rows.
 
-The animations below use the same real threshold-candidate crop and seed row,
-so the effect of the connectivity rule can be compared directly. Pixel
-coordinates follow the image convention ``[row, col] = [y, x]``: columns and
-``x`` run horizontally, while rows and ``y`` run vertically.
+The animations below use the same real candidate mask and seed row.
 
 .. figure:: _static/edge_delamination/seed_ratio_directional.gif
    :alt: Directional free-edge reconstruction with horizontal lateral support
@@ -66,7 +64,6 @@ Key parameters
 - ``directional_lateral_drift_scale`` derives drift from average crack width
   when no explicit pixel value is supplied.
 - ``post_threshold_closing_radius`` controls binary closing.
-- ``hard_floor`` provides an additional normalized intensity gate.
 
 See :doc:`detection` for the full API reference, including default values.
 

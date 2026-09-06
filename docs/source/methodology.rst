@@ -11,7 +11,7 @@ the same object, for the two delamination modes:
 Detection modes
 ---------------
 
-DelaDect distinguishes two delamination modes, each documented on its own page:
+DelaDect distinguishes three delamination modes, each documented on its own page:
 
 .. grid:: 1 2 3 3
    :gutter: 2
@@ -20,22 +20,21 @@ DelaDect distinguishes two delamination modes, each documented on its own page:
       :link: edge_delamination
       :link-type: doc
 
-      Damage connected to a specimen free edge: directional reconstruction
-      and frame-to-frame latching.
+      Performs delamination detection and ensures 
+      edge-connectivity.
 
    .. grid-item-card:: Diffuse delamination
       :link: diffuse_delamination
       :link-type: doc
 
-      Damage sought locally around tracked transverse cracks, using a
-      per-crack baseline to isolate new darkening.
+      Delamination performed in ROI around cracks.
 
    .. grid-item-card:: Multi-interface delamination
       :link: multi_interface_delamination
       :link-type: doc
 
-      Attributing later damage to the correct, deeper interface in
-      laminates with more than two plies. Edge-only.
+      The delamination methodology is performed
+      in multiple interfaces.
 
 .. toctree::
    :maxdepth: 1
@@ -48,26 +47,27 @@ DelaDect distinguishes two delamination modes, each documented on its own page:
 Detection sequence
 -------------------
 
-Edge and diffuse delamination target different features (a connected front
-vs. localized regions around cracks), but both are built on the same common
-backbone, applied per frame:
+Edge and diffuse delamination target different features (delamination
+starting on the edge and delamination around cracks), but both are built on the same common
+methodology, applied per frame:
 
-1. **Minimum history** -- a cumulative minimum over the stack so intensity
-   only ever decreases, filtering out transient bright noise (flashes,
-   sensor noise).
-2. **Normalization** -- divide by a reference frame so intensity change
-   reflects damage, not lighting drift.
-3. **Max/min filtering** -- morphological closing that suppresses thin
-   crack-like structures while preserving broader delamination regions.
-4. **Sharpening & Gaussian smoothing** -- widen the contrast between
-   delaminated and intact regions, then smooth out noise.
-5. **Constant scaling** -- map intensities to a fixed range so thresholding
+1. **Minimum history**: a cumulative minimum over the stack so the image
+   stack only gets darker. See :doc:`Image_pre_processing`.
+2. **Normalization**: division by a reference frame. See
+   :doc:`Image_pre_processing`.
+3. **Max/min filtering**: morphological closing (a max filter then a min
+   filter) with the window size, which suppresses thin 
+   structures like cracks while preserving diffuse and broad delamination.
+4. **Sharpening and Gaussian smoothing**: unsharp masking widens the
+   contrast between delaminated and intact regions, then Gaussian
+   smoothing for noise supressing.
+5. **Constant scaling**: maps intensities to a fixed range so thresholding
    behaves consistently across frames.
-6. **Thresholding** -- k-means (with Otsu as a fallback) turns the processed
-   frame into a binary candidate mask.
-7. **Morphological closing** -- fills small holes and bridges narrow gaps
+6. **Thresholding**: k-means (k=2) turns the processed frame into a binary
+   candidate mask, with Otsu as a fallback if k-means does not converge.
+7. **Morphological closing**: fills small holes and bridges narrow gaps
    left by thresholding.
-8. **Accumulation** -- union with the previous frame's mask, so detected
+8. **Accumulation**: union with the previous frame's mask, so detected
    damage only grows and single-frame flicker is rejected.
 
 .. figure:: _static/methodology/workflow_edge.png
@@ -75,26 +75,19 @@ backbone, applied per frame:
    :width: 320
    :align: center
 
-   The eight-step backbone applied to one edge-delamination example. Steps
-   1-5 are intensity-domain filtering; 6-7 binarize and clean up the mask;
-   8 accumulates it against the previous frame (blue = previous frame, red =
-   newly added delamination, yellow = common area).
-
-This same sequence runs for every delamination detection in DelaDect --
-edge or diffuse, single- or multi-interface -- only the region each step
-operates on differs (the whole frame for edge delamination, a rotated ROI
-around each crack for diffuse). Steps 1-2 are covered in detail on the
-:doc:`Image_pre_processing` page; steps 3-7 are shown pixel-by-pixel on
-:doc:`image_operations`; and the full per-mode sequence, including free-edge
-reconstruction and frame-to-frame latching, is in :doc:`edge_delamination`
-and :doc:`diffuse_delamination`.
+   The eight-step procedure applied to an edge-delamination example. 
+   Steps 1–5 filter the image, steps 6–7 create and 
+   clean the binary mask, and step 8 compares it with the 
+   previous frame.
 
 Combining the two
 ------------------
 
 :meth:`~deladect.detection.delamination.DelaminationDetector.detect_both_delaminations`
 runs both pipelines together and resolves any overlap
-between the two modes favouring the edge delamination.
+between the two modes favouring the edge delamination. This means that
+if diffuse and edge delamination is found in the same place, that region
+is classified as edge delamination.
 
 
 See also

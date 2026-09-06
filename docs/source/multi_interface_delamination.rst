@@ -4,15 +4,11 @@ Multi-Interface Delamination
 Everything on the :doc:`edge_delamination` and :doc:`diffuse_delamination`
 pages detects damage at a single interface. In a laminate with more than two
 plies, delamination can also develop at more than one interface over the
-course of a test -- and DelaDect can attribute later damage to the correct,
-deeper interface instead of lumping everything into the first one detected.
-This capability is edge-only: it is not available for diffuse delamination.
-
-Why interfaces need to be ordered
-----------------------------------
+course of a test. Deladect is able to detect delamination in multiple
+interfaces. This methods are ideal for specimens such as the "Sample-3".
 
 Consider a symmetric laminate such as ``[+θ/-θ/90]_s``. From a single
-frame, DelaDect only sees a distribution of pixel intensity -- there is no
+frame, DelaDect only sees a distribution of pixel intensity. There is no 
 way to tell, from one image alone, which physical interface a dark region
 belongs to. What *does* carry that information is the sequence of frames: if
 damage tends to appear at one interface first and only later spreads to a

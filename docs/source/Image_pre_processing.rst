@@ -1,4 +1,4 @@
-Normalization
+Pre-processing
 =====================
 
 Overview
@@ -8,8 +8,8 @@ raw frames are affected by noise such as lighting drifts slightly between shots,
 shadows, reflections flicker on and off, and the
 undamaged material never looks perfectly uniform to begin with. So, if a
 detector just looked at how *dark* a pixel is, it couldn't tell "this got
-darker because it delaminated" apart from "this got darker because the
-lighting changed." This page shows how the pre-processing
+darker because it delaminated" apart from "this got darker because of a shadow 
+or because the lighting conditions changed." This page shows how the pre-processing
 (or normalization) in DelaDect solves that. There are two mechanisms that
 help negate the already mentioned issues which are applied in order:
 
@@ -35,9 +35,10 @@ detector runs, via
 
 History clamp
 --------------
-A stray reflection or a speck of dust can make a pixel flash bright for a
-single frame and then go back to normal. That's noise and it
-should be ignored. The history clamp does this by remembering, for every
+A reflection or a speck of dust can make a pixel flicker bright for a
+single frame and then go back to normal. That's noise, not damage, and it
+needs to be filtered out before it affects detection. The history clamp
+does this by remembering, for every
 pixel, the darkest value it has *ever* reached so far, and forcing the
 current frame down to that darkest-so-far value: ``min(current_frame, history)``.
 A pixel only stays dark in the output once it has *actually* gone dark and
