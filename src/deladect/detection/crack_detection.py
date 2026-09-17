@@ -681,9 +681,9 @@ def pixels_to_length(input_data: List[Any], *, scale_px_mm: float) -> Dict[str, 
     return {"values": scaled}
 
 
-# ---------------------------------------------------------------------------
+# ----------
 # Internal helpers
-# ---------------------------------------------------------------------------
+# ----------
 
 
 def _build_crack_metrics_table(

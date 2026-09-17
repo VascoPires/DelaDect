@@ -1,7 +1,9 @@
 """Specimen, ply, and interface classes used throughout DelaDect.
 
-This module provides a central Specimen class and keeps the related data structures in one place. For clarity (and for visualization), 
-it is recommended to define plies and interfaces in the same order as they are stacked in the real specimen, although this is not strictly required.
+This module provides a central Specimen class and keeps the related data structures in one place. 
+For clarity (and for visualization), 
+it is recommended to define plies and interfaces in the same order as 
+they are stacked in the real specimen, although this is not strictly required.
 
 As a general rule, the classes are intended to be used as follows:
 
@@ -642,9 +644,9 @@ class Specimen:
         stack = self._build_stack(paths_list, dtype=dtype, as_gray=as_gray)
         setattr(self, f"image_stack_{name}", stack)
 
-    # ------------------------------------------------------------------
+    # ----------
     # Serialization helpers (config + metadata paths)
-    # ------------------------------------------------------------------
+    # ----------
     # These helpers persist/rebuild the specimen definition itself.
     # Heavy artefacts (crack bundles, delamination masks) are stored separately
     # as NPZ/CSV files; only their paths are serialized via ply/interface metadata.
@@ -757,10 +759,10 @@ class Specimen:
             metadata=payload.get("metadata", {}),
         )
 
-    # ------------------------------------------------------------------
-    # Ply helpers. 
+    # ----------
+    # Ply helpers.
     # Below some ply related functions for adding, removing and other ply functionalities.
-    # ------------------------------------------------------------------
+    # ----------
 
     def add_ply(
         self,
@@ -897,9 +899,9 @@ class Specimen:
         """Yield plies in their current stacking order."""
         yield from self.plies
 
-    # ------------------------------------------------------------------
+    # ----------
     # Interface helpers
-    # ------------------------------------------------------------------
+    # ----------
 
     def _resolve_ply_index(self, value: Optional[Union[int, Ply]], *, label: str) -> Optional[int]:
         """Resolve a ply-index argument that may be an int or a `Ply` object."""
@@ -1107,9 +1109,9 @@ class Specimen:
             joined.append(np.vstack(segments) if segments else np.empty((0, 2, 2)))
         return joined
 
-    # ------------------------------------------------------------------
+    # ----------
     # Convenience constructors
-    # ------------------------------------------------------------------
+    # ----------
 
     @classmethod
     def from_plus_minus(

@@ -21,9 +21,9 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 import numpy as np
 
 
-# ---------------------------------------------------------------------------
+# ----------
 # Public data classes
-# ---------------------------------------------------------------------------
+# ----------
 
 
 @dataclass(frozen=True)
@@ -61,9 +61,9 @@ class CrackTrack:
     history: List[Dict[str, Any]] = field(default_factory=list)
 
 
-# ---------------------------------------------------------------------------
+# ----------
 # Internal geometry helpers
-# ---------------------------------------------------------------------------
+# ----------
 
 
 def _segment_features(seg: np.ndarray) -> CrackDetection:
@@ -105,9 +105,9 @@ def _bbox_iou(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> flo
     return float(inter / union) if union > 0 else 0.0
 
 
-# ---------------------------------------------------------------------------
+# ----------
 # Public functions
-# ---------------------------------------------------------------------------
+# ----------
 
 
 def normalize_detections(raw_cracks: Sequence[np.ndarray]) -> List[CrackDetection]:
