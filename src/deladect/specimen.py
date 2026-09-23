@@ -1,7 +1,8 @@
 """Specimen, ply, and interface classes used throughout DelaDect.
 
-This module provides a central Specimen class and keeps the related data structures in one place. For clarity (and for visualization), 
-it is recommended to define plies and interfaces in the same order as they are stacked in the real specimen, although this is not strictly required.
+This module provides a central Specimen class and keeps the related data structures in one place. 
+For clarity (and for visualization), it is recommended to define plies and interfaces in the 
+same order as they are stacked in the real specimen, although this is not strictly required.
 
 As a general rule, the classes are intended to be used as follows:
 
@@ -9,7 +10,7 @@ As a general rule, the classes are intended to be used as follows:
   metadata for the specimen, namely the image stacks.
 * A Ply corresponds to the entity used for crack detection. This means that
   any crack detection goes through the ply class. A direction must be defined for each ply,
-  which is used to detect cracks in that specifinoc direction. Due to the nature of the method,
+  which is used to detect cracks in that specific direction. Due to the nature of the method,
   even if multiple plies have the same direction, the method will not be able to distinguish between them.
   So, for repeated plies, only one crack detection is performed and reported.
 * Interfaces correspond exclusively to the object related with delamination detection. For multi-edge
@@ -35,18 +36,19 @@ from pathlib import Path
 try:  
     from crackdect import ImageStack, ImageStackSQL, image_paths, sort_paths
 except Exception as exc: 
-    ImageStack = ImageStackSQL = None  # type: ignore[assignment]
-    image_paths = sort_paths = None  # type: ignore[assignment]
+    ImageStack = ImageStackSQL = None 
+    image_paths = sort_paths = None  
     _CRACKDECT_IMPORT_ERROR = exc
 else:
-    _CRACKDECT_IMPORT_ERROR = None  # type: ignore[assignment]
+    _CRACKDECT_IMPORT_ERROR = None  
 
 Color = Tuple[float, float, float, float]
 
 logger = logging.getLogger(__name__)
 
-# Superset of characters illegal in file/directory names across Windows
+# Checks the characters illegal in file/directory names across Windows
 # (<>:"/\|?* and control characters), macOS (: and /), and Linux (/).
+
 _ILLEGAL_PATH_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _WINDOWS_RESERVED_NAMES = {
     "CON", "PRN", "AUX", "NUL",
@@ -56,16 +58,9 @@ _WINDOWS_RESERVED_NAMES = {
 
 
 def sanitize_path_token(value: Any, *, fallback: str = "unnamed") -> str:
-    """Sanitize a display label into one file/directory-name-safe token.
-
-    Ply, interface, and specimen names are free-form display labels (e.g.
-    ``"0/90"`` for an interface) and are also used to derive on-disk file and
-    directory names (e.g. cache keys like ``"both_auto_0/90"``). This
-    replaces characters illegal on Windows, macOS, or Linux with ``"_"``,
-    strips leading/trailing dots and spaces (illegal as Windows filename
-    edges), and avoids Windows-reserved device names (``CON``, ``COM1``,
-    ...). A warning is logged whenever the result differs from the input,
-    since that changes what actually appears on disk.
+    """This function checks the name of a ply, interface or specimen.
+    And if ilegal names like "0/90" are used, these are checked and cleaned
+    up. 
     """
     original = str(value)
     token = _ILLEGAL_PATH_CHARS.sub("_", original).strip(" .")
@@ -85,7 +80,8 @@ def sanitize_path_token(value: Any, *, fallback: str = "unnamed") -> str:
 
 def rgba_from_hex(hex_color: str, alpha: float = 1.0) -> Color:
     """Convert ``#RRGGBB`` + alpha into an RGBA tuple (each entry 0-1).
-    This is just a helper function to define colours for plies and interfaces.
+    This is just a helper function to define colours for plies and interfaces
+    for output visualization.
     """
     hex_color = hex_color.lstrip("#")
     if len(hex_color) != 6:
@@ -104,11 +100,8 @@ DEFAULT_SECONDARY_DELAMINATION_COLOR: Color = rgba_from_hex("#1E88E5", 0.75)
 
 
 def _select_strain_column(df: pd.DataFrame, *, source: str) -> pd.DataFrame:
-    """Return the ``strain_y`` column as its own single-column DataFrame.
+    """Finds the ``strain_y`` column and returns it as its own single-column DataFrame.
 
-    Raises a clear ``ValueError`` naming ``source`` (the file the data came
-    from) instead of letting a missing column surface as a raw pandas
-    ``KeyError`` from inside specimen construction or data upload.
     """
     if "strain_y" not in df.columns:
         raise ValueError(
@@ -135,7 +128,7 @@ class Ply:
     Attributes
     ----------
     name:
-        Human-readable ply name (used in reports and plots).
+        Ply name 
     orientation_deg:
         Ply orientation in degrees. This is used to select the crack direction
         to be detected for this ply.
@@ -143,10 +136,7 @@ class Ply:
         Expected average crack width in pixels. Used as a tuning parameter for
         crack detection.
     min_crack_length_px:
-        Minimum crack length in pixels for a detected feature to be reported.
-    thickness_mm:
-        Optional ply thickness in millimeters used by 3D visualizations.
-        Defaults to ``1.0`` mm when not provided.
+        Minimum crack length in pixels for a detected feature
     color_rgba:
         RGBA color used to visualize this ply in plots.
     crack_color_rgba:
@@ -169,7 +159,6 @@ class Ply:
     orientation_deg: float
     avg_crack_width_px: float
     min_crack_length_px: float
-    thickness_mm: float = 1.0
     color_rgba: Color = DEFAULT_PLY_COLOR
     crack_color_rgba: Color = DEFAULT_CRACK_COLOR
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -236,8 +225,7 @@ class Specimen:
         image_types: Iterable of image suffixes/extensions to include (e.g. ``[".png"]``).
         avg_crack_width_px: Nominal average crack width in pixels for the specimen .
         dimensions: Optional mapping with geometric info in millimeters. Accepted keys include
-            ``width_mm``/``width``, ``height_mm``/``length_mm``/``height``/``length``,
-            and ``thickness_mm``/``thickness``.
+            ``width_mm``/``width`` and ``height_mm``/``length_mm``/``height``/``length``.
         strain_csv: Optional CSV file containing a ``strain_y`` column to merge later.
         stack_backend: ``"auto"``, ``"memory"`` or ``"sql"`` choice for stack storage.
         stack_limit_mb: Memory ceiling (MB) before ``"auto"`` flips to SQL-backed stacks.
@@ -352,17 +340,6 @@ class Specimen:
 
     @staticmethod
     def _validate_result_component(value: str, *, label: str) -> str:
-        """Return one safe relative directory component.
-
-        Result-directory components are identifiers, not arbitrary paths.  In
-        particular, accepting ``..`` or an absolute path would allow callers
-        to write outside the specimen's configured result root. Callers that
-        build a component from a free-form display label (e.g. an interface
-        named ``"0/90"``) should sanitize it first with
-        :func:`sanitize_path_token`; this validator intentionally stays
-        strict so misuse of the public ``results_dir``/specimen-name API is
-        surfaced rather than silently rewritten.
-        """
         component = str(value).strip()
         path = Path(component)
         if (
@@ -630,8 +607,8 @@ class Specimen:
         sorted_paths, numbers = sort_paths(paths, sorting_key=self.sorting_key)
         if sorted_paths.size == 0:
             paths_list = sorted(map(str, paths))
-            # sort_paths couldn't extract a frame number from these filenames;
-            # fall back to the filename stem as the best available identity key.
+ 
+            # fall back to the filename
             frame_keys: List[Any] = [Path(p).stem for p in paths_list]
         else:
             paths_list = [str(p) for p in sorted_paths]
@@ -642,12 +619,7 @@ class Specimen:
         stack = self._build_stack(paths_list, dtype=dtype, as_gray=as_gray)
         setattr(self, f"image_stack_{name}", stack)
 
-    # ------------------------------------------------------------------
-    # Serialization helpers (config + metadata paths)
-    # ------------------------------------------------------------------
-    # These helpers persist/rebuild the specimen definition itself.
-    # Heavy artefacts (crack bundles, delamination masks) are stored separately
-    # as NPZ/CSV files; only their paths are serialized via ply/interface metadata.
+a.
 
     def to_dict(self) -> Dict[str, Any]:
         """Return a JSON-serializable snapshot of this specimen.
@@ -705,7 +677,6 @@ class Specimen:
             "orientation_deg": ply.orientation_deg,
             "avg_crack_width_px": ply.avg_crack_width_px,
             "min_crack_length_px": ply.min_crack_length_px,
-            "thickness_mm": ply.thickness_mm,
             "color_rgba": list(ply.color_rgba),
             "crack_color_rgba": list(ply.crack_color_rgba),
             "metadata": ply.metadata,
@@ -722,7 +693,6 @@ class Specimen:
             orientation_deg=payload["orientation_deg"],
             avg_crack_width_px=payload["avg_crack_width_px"],
             min_crack_length_px=payload["min_crack_length_px"],
-            thickness_mm=float(payload.get("thickness_mm", 1.0)),
             color_rgba=tuple(payload.get("color_rgba", DEFAULT_PLY_COLOR)),
             crack_color_rgba=tuple(payload.get("crack_color_rgba", DEFAULT_CRACK_COLOR)),
             metadata=payload.get("metadata", {}),
@@ -757,10 +727,10 @@ class Specimen:
             metadata=payload.get("metadata", {}),
         )
 
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------------------------------
     # Ply helpers. 
     # Below some ply related functions for adding, removing and other ply functionalities.
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------------------------
 
     def add_ply(
         self,
@@ -770,7 +740,6 @@ class Specimen:
         orientation_deg: Optional[float] = None,
         avg_crack_width_px: Optional[float] = None,
         min_crack_length_px: Optional[float] = None,
-        thickness_mm: Optional[float] = None,
         color_rgba: Optional[Color] = None,
         crack_color_rgba: Optional[Color] = None,
         metadata: Optional[Dict[str, Any]] = None,
@@ -796,7 +765,6 @@ class Specimen:
                 orientation_deg=orientation_deg,
                 avg_crack_width_px=avg_width,
                 min_crack_length_px=min_length,
-                thickness_mm=float(thickness_mm) if thickness_mm is not None else 1.0,
                 color_rgba=color_rgba or DEFAULT_PLY_COLOR,
                 crack_color_rgba=crack_color_rgba or self.crack_color_rgba,
                 metadata=metadata or {},

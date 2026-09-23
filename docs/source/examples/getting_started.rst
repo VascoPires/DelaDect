@@ -4,7 +4,7 @@
 This first example aims to show a complete DelaDect workflow, including
 crack detection, diffuse delamination detection, and edge delamination detection. 
 
-A `Binder <https://mybinder.org/v2/gh/vascodcpires/deladect/main?labpath=notebooks/getting_started.ipynb>`_,
+A `Binder <https://mybinder.org/v2/gh/VascoPires/DelaDect/HEAD?labpath=notebooks/getting_started.ipynb>`_,
 notebook which serves as a companion to this example is available in the repository and can be run 
 without installation.
 

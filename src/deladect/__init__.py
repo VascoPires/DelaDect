@@ -5,7 +5,14 @@ from importlib.metadata import PackageNotFoundError, version
 
 
 def _configure_numba_defaults() -> None:
-    """Default to non-JIT crackdect execution unless the user opted in."""
+    """Default to non-JIT crackdect execution unless the user opted in.
+
+    This is necessary because crackdect's numba-jitted crack-detection
+    helpers (``find_cracks`` / ``_find_crack_end``) fail to compile under
+    newer numba releases. 
+    Disabling JIT makes numba fall back to plain Python and
+    avoids the crash.
+    """
     if os.environ.get("NUMBA_DISABLE_JIT") is not None:
         return
     if os.environ.get("DELADECT_ENABLE_NUMBA_JIT", "").strip().lower() in {"1", "true", "yes", "on"}:
@@ -20,10 +27,7 @@ try:  # pragma: no cover - metadata not available during editable installs
 except PackageNotFoundError:  # pragma: no cover
     __version__ = "0.0.0"
 
-# Re-export the entry points every workflow starts from, so `import deladect`
-# alone is enough to reach `deladect.Specimen`, `deladect.DelaminationDetector`,
-# etc. -- the submodule imports (`deladect.specimen`, `deladect.detection`)
-# remain available for everything else.
+
 from .specimen import Specimen  # noqa: E402
 from .detection import DelaminationDetector, crack_analysis, plot_cracks  # noqa: E402
 

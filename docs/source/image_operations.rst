@@ -8,8 +8,14 @@ Directional max/min filtering
 -----------------------------
 
 The horizontal ``1 × 5`` window removes narrow vertical crack artefacts while
-retaining the longer horizontal delamination band.  The maximum pass is
-followed by the minimum pass.
+retaining the longer delamination band.  The maximum pass is
+followed by a minimum pass. As it can be see in the animation below,
+when the max filter is performed, darker crack pixels are replaced by the surrounding
+brighter background, so isolated cracks are removed while most of the
+delamination remains. However, the maximum filter can also remove delamination 
+close to its left and
+right boundaries. To recover these regions, a minimum filter with the same
+window size is applied afterwards.
 
 .. image:: _static/image_operations/max_min_cleanup.gif
    :alt: Directional maximum and minimum filtering of an oversized-pixel delamination band
@@ -31,13 +37,32 @@ orientation of the free edge.
 Constant scaling
 ----------------
 
-The smoothed intensities are mapped to ``[0, 1]`` using fixed lower and upper
-bounds.  Values outside the bounds are clipped.
+The smoothed intensity histogram is used to choose a lower and an upper
+scaling point. By default these are the 10th and 99th percentiles. Pixels at
+or below the lower percentile are mapped to 0, pixels at or above the upper
+percentile are mapped to 1, and values between them are mapped linearly.
+
+The percentile levels can be changed when a different part of the intensity
+distribution should define the useful range. Because the scaling points are
+computed from the image distribution, they adapt when the image brightness
+or contrast changes. The histogram below illustrates the two percentile
+locations, the clipped tails, and the linearly mapped interval.
 
 .. image:: _static/image_operations/constant_scaling.png
-   :alt: Constant scaling of the smoothed image to zero through one
+   :alt: Percentile scaling illustrated with a smoothed image, its intensity histogram marked at the 10th and 99th percentiles, and the resulting image scaled to zero through one
    :width: 760
    :align: center
+
+Let :math:`I` denote the smoothed intensity and let :math:`q_{10}` and
+:math:`q_{99}` denote the intensity values at the 10th and 99th percentiles,
+respectively. The scaled intensity is
+
+.. math::
+
+   I_{\mathrm{scaled}}
+   = \operatorname{clip}\!\left(
+     \frac{I-q_{10}}{q_{99}-q_{10}},\,0,\,1
+     \right).
 
 Thresholding
 ------------

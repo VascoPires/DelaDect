@@ -29,7 +29,7 @@ reference and the rolling median reference. The second part shows how to perform
 on a single interface. Finally, the third part shows how to perform delamination detection on multiple
 interfaces.
 
-A `Binder <https://mybinder.org/v2/gh/vascodcpires/deladect/main?labpath=notebooks/multi_interface_edge_delamination.ipynb>`_
+A `Binder <https://mybinder.org/v2/gh/VascoPires/DelaDect/HEAD?labpath=notebooks/multi_interface_edge_delamination.ipynb>`_
 notebook that serves as a companion to this example is available in the
 repository and can be run without installation.
 

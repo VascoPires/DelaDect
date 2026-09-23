@@ -1,18 +1,13 @@
-"""Shift correction and strain evaluation tooling with a Tkinter GUI.
+"""Shift correction and strain evaluation tooling with a GUI.
 
-This module offers a production-ready interface around the original research
-prototype. The refactor provides:
+This script provides a graphical user interface (GUI) for performing 
+shift correction and strain evaluation on a series of images. 
 
-* Configurable image suffix and extension handling (no longer bound to
-  ``"cycles.bmp"``).
-* A modernised Tk GUI with explicit status updates, error handling, and
-  settings management.
-* Programmatic separation between data-handling (``SpecimenVideo`` /
-  ``DIC``) and UI (``ShiftCorrectionApp``).
-
-Several scientific routines (digital image correlation, strain evaluation,
-point tracking) remain unchanged, but have been wrapped with additional
-safeguards so the application fails gracefully when misconfigured.
+The way to operate it is very straight forward, all that is needed is
+to first select a folder containing the images to be processed, select the
+reference points and then perform the shift correction and strain evaluation (if desired). 
+The results will be saved in a subfolder of the selected folder or in an output folder
+defined by the user.
 """
 
 from __future__ import annotations

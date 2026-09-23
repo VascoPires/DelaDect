@@ -60,17 +60,10 @@ DelaDect dependencies are installed automatically.
 - `scikit-image ≥ 0.18.1 <https://scikit-image.org/>`_
 - `Pillow ≥ 8.4.0 <https://python-pillow.org/>`_
 
-Documentation overview
-----------------------
 
-The documentation is divided into three sections. **Examples** contains
-step-by-step examples of some analysis. **User Guide** follows the 
-analysis pipeline from image loading to detection. **Reference** collects the
-callable classes, functions, and their default parameter values.
-
-There is also a binder notebooks available in this repository to run the examples without installing DelaDect. 
+There are binder notebooks available in this repository to run the examples without installing DelaDect. 
 You can access it at
-`Binder <https://mybinder.org/v2/gh/vascodcpires/deladect/main?labpath=notebooks/getting_started.ipynb>`_.
+`Binder <https://mybinder.org/v2/gh/VascoPires/DelaDect/HEAD?labpath=notebooks/getting_started.ipynb>`_.
 
 .. toctree::
    :maxdepth: 1

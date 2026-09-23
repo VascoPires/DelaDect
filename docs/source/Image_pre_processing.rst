@@ -64,7 +64,7 @@ getting narrower and shifting to the darker side over time.
 
 .. image:: _static/normalization/history_clamp_noise.png
    :alt: An unclamped vs. history-clamped image strip across the stack, plus pixel-value histograms narrowing as history accumulates and a plot of the background median with its 10th-to-90th-percentile interval, flat without the clamp and converging with it
-   :width: 720
+   :width: 100%
    :align: center
 
 Reference normalization
@@ -166,4 +166,3 @@ References
    GFRP laminates undergoing large tensile strains.
    *Composites Science and Technology*, 253, 110638.
    `<https://doi.org/10.1016/j.compscitech.2024.110638>`_
-

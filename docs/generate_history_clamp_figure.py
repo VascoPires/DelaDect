@@ -6,6 +6,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import scienceplots  # noqa: F401  # registers the ``science`` style
 
 from deladect.detection.delamination._preprocess import PreprocessingMixin
 
@@ -17,6 +18,9 @@ SAMPLE_FRAMES = (0, 4, 9, 16, 24)
 BACKGROUND_LEVEL = 0.68
 NOISE_SIGMA = 0.075
 SEED = 17
+BLUE = "#3A7BD5"
+RED = "#CC4B4B"
+BLUE_SEQUENCE = ("#A8C9F3", "#7AA8E7", "#568DDE", BLUE)
 
 
 class _HistoryProcessor(PreprocessingMixin):
@@ -68,19 +72,39 @@ def main() -> None:
     raw_median, raw_p10, raw_p90 = _background_summary(raw_stack, background)
     clamp_median, clamp_p10, clamp_p90 = _background_summary(clamped_stack, background)
 
+    plt.style.use("science")
     plt.rcParams.update(
         {
+            "text.usetex": False,
             "font.family": "serif",
+            "font.serif": ["CMU Serif", "Times New Roman", "Times", "DejaVu Serif"],
             "font.size": 16,
-            "axes.titlesize": 18,
             "axes.labelsize": 18,
             "axes.labelweight": "normal",
+            "axes.edgecolor": "#1A1A1A",
+            "axes.linewidth": 0.9,
             "xtick.labelsize": 15,
             "ytick.labelsize": 15,
-            "legend.fontsize": 16,
+            "xtick.direction": "in",
+            "ytick.direction": "in",
+            "xtick.top": True,
+            "ytick.right": True,
+            "xtick.major.size": 5.0,
+            "ytick.major.size": 5.0,
+            "xtick.major.width": 0.9,
+            "ytick.major.width": 0.9,
+            "xtick.minor.size": 2.5,
+            "ytick.minor.size": 2.5,
+            "xtick.minor.width": 0.7,
+            "ytick.minor.width": 0.7,
+            "legend.fontsize": 14,
+            "legend.frameon": False,
+            "figure.facecolor": "white",
+            "axes.facecolor": "white",
+            "savefig.facecolor": "none",
         }
     )
-    fig = plt.figure(figsize=(15.5, 14.2))
+    fig = plt.figure(figsize=(12.0, 11.0))
     fig.subplots_adjust(
         left=0.065,
         right=0.985,
@@ -115,8 +139,7 @@ def main() -> None:
 
     hist_ax = fig.add_subplot(plot_grid[0, 0])
     bins = np.linspace(0.34, 1.0, 45)
-    blues = plt.cm.Blues(np.linspace(0.35, 0.90, 4))
-    for color, frame_idx in zip(blues, (0, 4, 9, 24)):
+    for color, frame_idx in zip(BLUE_SEQUENCE, (0, 4, 9, 24)):
         hist_ax.hist(
             clamped_stack[frame_idx][background] / 255.0,
             bins=bins,
@@ -131,12 +154,14 @@ def main() -> None:
         histtype="step",
         linewidth=2.2,
         linestyle="--",
-        color="#D62728",
+        color=RED,
         label="unclamped: frame 0",
     )
     hist_ax.set_xlabel("Pixel greyscale value")
     hist_ax.set_ylabel("Pixel count")
     hist_ax.set_xlim(bins[0], bins[-1])
+    hist_ax.set_box_aspect(1)
+    hist_ax.minorticks_on()
     hist_handles, hist_labels = hist_ax.get_legend_handles_labels()
 
     summary_ax = fig.add_subplot(plot_grid[0, 1])
@@ -145,7 +170,7 @@ def main() -> None:
         frames,
         raw_p10,
         raw_p90,
-        color="#D62728",
+        color=RED,
         alpha=0.16,
         linewidth=0,
         label="unclamped: 10th–90th percentile",
@@ -153,7 +178,7 @@ def main() -> None:
     summary_ax.plot(
         frames,
         raw_median,
-        color="#D62728",
+        color=RED,
         linestyle="--",
         linewidth=2.2,
         label="unclamped: median",
@@ -162,7 +187,7 @@ def main() -> None:
         frames,
         clamp_p10,
         clamp_p90,
-        color="#1F77B4",
+        color=BLUE,
         alpha=0.22,
         linewidth=0,
         label="history clamp: 10th–90th percentile",
@@ -170,7 +195,7 @@ def main() -> None:
     summary_ax.plot(
         frames,
         clamp_median,
-        color="#1F77B4",
+        color=BLUE,
         linewidth=2.4,
         label="history clamp: median",
     )
@@ -178,6 +203,8 @@ def main() -> None:
     summary_ax.set_ylabel("Background greyscale value")
     summary_ax.set_xlim(0, N_FRAMES - 1)
     summary_ax.set_ylim(0.42, 0.82)
+    summary_ax.set_box_aspect(1)
+    summary_ax.minorticks_on()
     summary_handles, summary_labels = summary_ax.get_legend_handles_labels()
 
     hist_legend_ax = fig.add_subplot(legend_grid[0, 0])
@@ -187,6 +214,7 @@ def main() -> None:
         hist_labels,
         frameon=False,
         loc="center",
+        bbox_to_anchor=(0.5, 0.44),
         ncol=2,
     )
     summary_legend_ax = fig.add_subplot(legend_grid[0, 1])
@@ -196,11 +224,18 @@ def main() -> None:
         summary_labels,
         frameon=False,
         loc="center",
+        bbox_to_anchor=(0.5, 0.44),
         ncol=1,
     )
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUTPUT, dpi=180, facecolor="white")
+    fig.savefig(
+        OUTPUT,
+        dpi=300,
+        bbox_inches="tight",
+        pad_inches=0.05,
+        transparent=True,
+    )
     plt.close(fig)
     print(OUTPUT)
 
