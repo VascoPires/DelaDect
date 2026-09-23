@@ -1074,9 +1074,9 @@ class DiffuseDetector:
                 max_cost=max_cost,
             )
 
-            # ------------------------------------------------------------------
+            # ----------
             # Terminate unmatched tracks and run vanishing-crack diffuse check
-            # ------------------------------------------------------------------
+            # ----------
             for ti in unmatched_tracks_idx:
                 track = tracks[ti]
                 track.active = False
@@ -1146,9 +1146,9 @@ class DiffuseDetector:
 
             det_to_track: Dict[int, int] = {di: ti for ti, di in matched.items()}
 
-            # ------------------------------------------------------------------
+            # ----------
             # Spawn new tracks for unmatched detections
-            # ------------------------------------------------------------------
+            # ----------
             for di in unmatched_det_idx:
                 det = detections[di]
                 track = CrackTrack(
@@ -1168,9 +1168,9 @@ class DiffuseDetector:
                 det_to_track[di] = len(tracks) - 1
                 next_track_id += 1
 
-            # ------------------------------------------------------------------
+            # ----------
             # Update matched tracks and run per-track diffuse
-            # ------------------------------------------------------------------
+            # ----------
             for ti, di in matched.items():
                 track = tracks[ti]
                 det = detections[di]

@@ -8,10 +8,13 @@ to first select a folder containing the images to be processed, select the
 reference points and then perform the shift correction and strain evaluation (if desired). 
 The results will be saved in a subfolder of the selected folder or in an output folder
 defined by the user.
+
 """
 
 from __future__ import annotations
 
+
+# All of the libraries used here:
 import csv
 import logging
 import os
@@ -42,17 +45,14 @@ RESAMPLE_LANCZOS = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Logging configuration
-# ---------------------------------------------------------------------------
+########
+# Logger setup
 LOGGER = logging.getLogger(__name__)
 if not LOGGER.handlers:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 
 
-# ---------------------------------------------------------------------------
-# Constants & defaults
-# ---------------------------------------------------------------------------
+# Some defaults
 DEFAULT_SORTING_KEY = "cycles"
 DEFAULT_SORTING_MODE = "suffix"
 DEFAULT_FILE_TYPES: Tuple[str, ...] = (
@@ -66,7 +66,7 @@ DEFAULT_FILE_TYPES: Tuple[str, ...] = (
 
 
 class ProcessingMode(Enum):
-    """Enum representing the desired processing flow."""
+    """What kind of processing to perform on the image sequence."""
 
     NONE = auto()
     SHIFT = auto()
@@ -76,7 +76,7 @@ class ProcessingMode(Enum):
 
 @dataclass
 class ProcessingSettings:
-    """Container for processing parameters tweakable via the GUI."""
+    """Container for processing parameters."""
 
     step: int = 1
     median_filter: bool = True
@@ -89,7 +89,7 @@ class ProcessingSettings:
 
 
 class SpecimenVideo:
-    """Lightweight iterator over specimen frames on disk."""
+    """Iterator over specimen frames on disk."""
 
     def __init__(
         self,
@@ -130,7 +130,7 @@ class SpecimenVideo:
             )
         self._validate_uniform_dimensions()
 
-    # ------------------------------------------------------------------
+    # ----------
     def _collect_paths(self) -> List[Path]:
         extensions = self.file_types
         sorting_key = self.sorting_key.lower()
@@ -155,6 +155,7 @@ class SpecimenVideo:
                     continue
             paths.append(path)
 
+        # here we are sorting based on the suffix or prefix
         if sorting_key and self.sorting_mode in {"suffix", "prefix"} and not paths:
             LOGGER.warning(
                 "No files matched sorting key '%s' (%s mode) in %s; falling back to extension-only matching.",
@@ -178,7 +179,7 @@ class SpecimenVideo:
 
         return sorted(paths, key=sort_key)
 
-    # ------------------------------------------------------------------
+    # ----------
     def _validate_uniform_dimensions(self) -> None:
         reference_size: Optional[Tuple[int, int]] = None
         reference_name: Optional[str] = None
@@ -215,11 +216,11 @@ class SpecimenVideo:
             "Use a clean input folder (only raw frames) or adjust sorting/file types."
         )
 
-    # ------------------------------------------------------------------
+    # ----------
     def __len__(self) -> int:
         return len(self.image_paths)
 
-    # ------------------------------------------------------------------
+    # ----------
     @lru_cache(maxsize=8)
     def get_image(self, frame: int) -> np.ndarray:
         path = self.image_paths[frame]
@@ -281,6 +282,10 @@ class DIC:
         to enhance features, then identifies local minima points that fall 
         below a specified threshold value. These points are returned as coordinates.
 
+        This is the most important function of this tool, since every other 
+        decision is based on the points extracted here. If not all points
+        are found, tweaking the treshold value usually helps.
+
         Parameters
         ----------
         image : array-like
@@ -309,14 +314,13 @@ class DIC:
 
     def match_points(self, ref_points, points):
         """
-        Matches points between two sets using bipartite graph matching.
+        Matches points between two sets.
 
         This function takes two sets of points, `ref_points` and `points`, and finds
         the best matching between them based on spatial proximity. It constructs
         k-D trees for both sets of points and computes a sparse distance matrix 
         within a maximum distance threshold. The distance matrix is then converted
-        to a score matrix, and a maximum bipartite matching is performed to find
-        the optimal correspondence between the points.
+        to a score matrix.
 
         Parameters
         ----------
@@ -551,18 +555,8 @@ class DIC:
 
     def plot_marker(self, idx: int):
         """
-        Plots the tracking of points on the image at the specified index.
-
-        This function generates a plot of the points tracked in the image
-        sequence, highlighting the points in the current image at the given index
-        with red markers, and drawing lines connecting their positions across all
-        images in blue. The plot is saved as a PNG file in the tracking directory.
-
-        Parameters
-        ----------
-        idx : int
-            The index of the image in the sequence for which to plot and save the
-            marker tracking visualization.
+        Just a ploter for the marker tracking, to see if the points 
+        are being tracked correctly.
         """
 
         image = self.list_images[idx]
@@ -596,8 +590,8 @@ class DIC:
                  used by the current GUI workflows. The results obtained from this 
                  function should be adapted to the specific use case and compared with 
                  other strain measuring methods.
-        
-        Supported point orders are counter-clockwise:
+
+        Most of the function is hardcoded for the following cases:
             4 points:
                 1. Top left
                 2. Bottom left
@@ -756,7 +750,7 @@ class ShiftCorrectionApp:
         self._build_gui()
         self._bind_canvas_events()
 
-    # ------------------------------------------------------------------
+    # ----------
     def _build_gui(self) -> None:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
@@ -813,7 +807,7 @@ class ShiftCorrectionApp:
         status_frame.grid(row=1, column=0, sticky="ew")
         ttk.Label(status_frame, textvariable=self.status_var, relief=tk.SUNKEN, anchor="w").pack(fill="x")
 
-    # ------------------------------------------------------------------
+    # ----------
     def _bind_canvas_events(self) -> None:
         # Bind left button to start pan; add point only on Ctrl+Click (or Command on macOS)
         self.canvas.bind("<ButtonPress-1>", self._on_button_press)
@@ -824,12 +818,12 @@ class ShiftCorrectionApp:
             self.canvas.bind("<Button-4>", lambda event: self.zoom_image(event, zoom_in=True))
             self.canvas.bind("<Button-5>", lambda event: self.zoom_image(event, zoom_in=False))
 
-    # ------------------------------------------------------------------
+    # ----------
     def update_status(self, message: str) -> None:
         LOGGER.info(message)
         self.status_var.set(message)
 
-    # ------------------------------------------------------------------
+    # ----------
     def open_directory(self) -> None:
         directory = filedialog.askdirectory(title="Select image folder")
         if not directory:
@@ -839,7 +833,7 @@ class ShiftCorrectionApp:
         self.update_status(f"Selected directory: {self.saved_path}")
         self._prepare_specimen_video()
 
-    # ------------------------------------------------------------------
+    # ----------
     def open_image(self) -> None:
         initialdir = str(self.saved_path) if self.saved_path else os.getcwd()
         filetypes = [("Image files", "*.bmp *.png *.jpg *.jpeg *.tif *.tiff"), ("All files", "*.*")]
@@ -857,7 +851,7 @@ class ShiftCorrectionApp:
         self.display_image()
         self._prepare_specimen_video()
 
-    # ------------------------------------------------------------------
+    # ----------
     def save_image_in(self) -> None:
         directory = filedialog.askdirectory(title="Select output folder")
         if not directory:
@@ -865,7 +859,7 @@ class ShiftCorrectionApp:
         self.output_folder = Path(directory)
         self.update_status(f"Output directory set to: {self.output_folder}")
 
-    # ------------------------------------------------------------------
+    # ----------
     def _prepare_specimen_video(self) -> None:
         if not self.saved_path:
             return
@@ -912,7 +906,7 @@ class ShiftCorrectionApp:
             messagebox.showerror("Images not found", str(exc))
             self.update_status("Failed to initialise image sequence; adjust sorting or file types.")
 
-    # ------------------------------------------------------------------
+    # ----------
     def add_point(self, event: tk.Event) -> None:
         if not self.current_image:
             return
@@ -924,7 +918,7 @@ class ShiftCorrectionApp:
         self.redraw_points()
         self.update_status(f"Point added at (row={y}, col={x}). Total points: {len(self.points)}")
 
-    # ------------------------------------------------------------------
+    # ----------
     def _on_button_press(self, event: tk.Event) -> None:
         # Record start of potential pan; actual behavior depends on modifier keys
         self._pan_start = (event.x, event.y)
@@ -941,7 +935,7 @@ class ShiftCorrectionApp:
             # Clear pan_start so dragging doesn't move the image immediately after adding
             self._pan_start = None
 
-    # ------------------------------------------------------------------
+    # ----------
     def _on_button_drag(self, event: tk.Event) -> None:
         # If pan was started, perform panning
         if not hasattr(self, "_pan_start") or self._pan_start is None:
@@ -953,12 +947,12 @@ class ShiftCorrectionApp:
         self.image_offset[1] += dy
         self.display_image()
 
-    # ------------------------------------------------------------------
+    # ----------
     def _on_button_release(self, event: tk.Event) -> None:
         # End pan gesture
         self._pan_start = None
 
-    # ------------------------------------------------------------------
+    # ----------
     def pan_image(self, event: tk.Event) -> None:
         if not hasattr(self, "_last_pan"):
             self._last_pan = (event.x, event.y)
@@ -970,7 +964,7 @@ class ShiftCorrectionApp:
         self.image_offset[1] += dy
         self.display_image()
 
-    # ------------------------------------------------------------------
+    # ----------
     def zoom_image(self, event: tk.Event, zoom_in: Optional[bool] = None) -> None:
         if zoom_in is None:
             zoom_in = event.delta > 0
@@ -978,7 +972,7 @@ class ShiftCorrectionApp:
         self.zoom_level = max(0.1, min(self.zoom_level, 10.0))
         self.display_image()
 
-    # ------------------------------------------------------------------
+    # ----------
     def display_image(self) -> None:
         if not self.current_image:
             return
@@ -990,7 +984,7 @@ class ShiftCorrectionApp:
         self.canvas.create_image(self.image_offset[0], self.image_offset[1], image=self.photo_image, anchor=tk.NW)
         self.redraw_points()
 
-    # ------------------------------------------------------------------
+    # ----------
     def redraw_points(self) -> None:
         self.canvas.delete("points")
         for row, col in self.points:
@@ -999,13 +993,13 @@ class ShiftCorrectionApp:
             self.canvas.create_oval(display_x - 2, display_y - 2, display_x + 2, display_y + 2, fill="red", outline="", tags="points")
             self.canvas.create_text(display_x + 4, display_y, text=f"({row},{col})", anchor=tk.NW, fill="red", tags="points")
 
-    # ------------------------------------------------------------------
+    # ----------
     def clear_points(self) -> None:
         self.points.clear()
         self.redraw_points()
         self.update_status("All points cleared.")
 
-    # ------------------------------------------------------------------
+    # ----------
     def open_settings(self) -> None:
         def save() -> None:
             try:
@@ -1080,7 +1074,7 @@ class ShiftCorrectionApp:
 
         ttk.Button(dialog, text='Save', command=save).grid(row=8, column=0, columnspan=2, pady=10)
 
-    # ------------------------------------------------------------------
+    # ----------
     def _request_processing(self, mode: ProcessingMode) -> None:
         if self.processing_in_progress:
             messagebox.showinfo("Processing", "A processing task is already running.")
@@ -1094,7 +1088,7 @@ class ShiftCorrectionApp:
         self.processing_mode = mode
         self.root.after(50, self.run_processing)
 
-    # ------------------------------------------------------------------
+    # ----------
     def run_processing(self) -> None:
         if self.processing_mode == ProcessingMode.NONE:
             return
@@ -1193,14 +1187,14 @@ class ShiftCorrectionApp:
             self.processing_in_progress = False
             self.processing_mode = ProcessingMode.NONE
 
-    # ------------------------------------------------------------------
+    # ----------
     def mainloop(self) -> None:
         self.root.mainloop()
 
 
-# ---------------------------------------------------------------------------
+# ----------
 # Entry point
-# ---------------------------------------------------------------------------
+# ----------
 def main() -> None:
     root = tk.Tk()
     app = ShiftCorrectionApp(root)

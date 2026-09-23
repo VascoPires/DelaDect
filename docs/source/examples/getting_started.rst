@@ -17,7 +17,7 @@ The specimen is built by constructing a
 Here plies are associated with the crack detection and in which orientation
 the cracks are aligned and interfaces are associated with the delamination detection.
 For a diffuse-edge delamination detection, defining an interface is not mandatory, however
-it is mandatory for multi-interface delamination detection (see :doc:`delamination_multi_interface`).
+it is mandatory for multi-interface delamination detection (see :doc:`delamination_multi_interface` and :doc:).
 
 There are two ways of supplying the specimen images to DelaDect: either by providing a single full-frame 
 stack or by providing three separate stacks for the upper, middle, and lower regions of the specimen (here,

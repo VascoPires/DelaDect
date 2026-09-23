@@ -22,15 +22,17 @@ def _configure_numba_defaults() -> None:
 
 _configure_numba_defaults()
 
-try:  # pragma: no cover - metadata not available during editable installs
+try:  
     __version__ = version("deladect")
-except PackageNotFoundError:  # pragma: no cover
+except PackageNotFoundError:  
     __version__ = "0.0.0"
-
 
 from .specimen import Specimen  # noqa: E402
 from .detection import DelaminationDetector, crack_analysis, plot_cracks  # noqa: E402
 
+
+from .specimen import Specimen  
+from .detection import DelaminationDetector, crack_analysis, plot_cracks  
 __all__ = [
     "__version__",
     "Specimen",
