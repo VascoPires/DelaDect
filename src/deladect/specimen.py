@@ -1,56 +1,41 @@
-"""Specimen, ply, and interface classes used throughout DelaDect.
+"""Specimen, ply and interface definitions.
 
-This module provides a central Specimen class and keeps the related data structures in one place. 
-For clarity (and for visualization), 
-it is recommended to define plies and interfaces in the same order as 
-they are stacked in the real specimen, although this is not strictly required.
+* A :class:`Specimen` holds the image stacks, plies and interfaces.
+* A :class:`Ply` is what crack detection runs on; its orientation sets
+  the crack direction. Plies with the same orientation can't be told
+  apart, so detection runs once per orientation.
+* An :class:`Interface` is what delamination detection runs on.
+  Multi-interface edge detection needs one per delamination plane.
 
-
-As a general rule, the classes are intended to be used as follows:
-
-* A specimen is an assembly of plies and interfaces. And contains the most relevant
-  metadata for the specimen, namely the image stacks.
-* A Ply corresponds to the entity used for crack detection. This means that
-  any crack detection goes through the ply class. A direction must be defined for each ply,
-  which is used to detect cracks in that specific direction. Due to the nature of the method,
-  even if multiple plies have the same direction, the method will not be able to distinguish between them.
-  So, for repeated plies, only one crack detection is performed and reported.
-* Interfaces correspond exclusively to the object related with delamination detection. For multi-edge
-  delamination detection, multiple interfaces need be defined.
+Adding plies and interfaces in stacking order keeps plots readable but
+isn't required.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 import logging
+from pathlib import Path
 import re
-import sys
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 import warnings
 
 import numpy as np
 import pandas as pd
 from skimage.io import imread
-from pathlib import Path
 
-
-# Test if main requirements are installed
-try:  
+try:
     from crackdect import ImageStack, ImageStackSQL, image_paths, sort_paths
-except Exception as exc: 
-    ImageStack = ImageStackSQL = None 
-    image_paths = sort_paths = None  
-    _CRACKDECT_IMPORT_ERROR = exc
+except Exception as exc:
+    _CRACKDECT_IMPORT_ERROR: Optional[Exception] = exc
 else:
-    _CRACKDECT_IMPORT_ERROR = None  
+    _CRACKDECT_IMPORT_ERROR = None
 
 Color = Tuple[float, float, float, float]
 
 logger = logging.getLogger(__name__)
 
-# Checks the characters illegal in file/directory names across Windows
-# (<>:"/\|?* and control characters), macOS (: and /), and Linux (/).
-
+# Characters illegal in file/directory names on Windows, macOS or Linux.
 _ILLEGAL_PATH_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _WINDOWS_RESERVED_NAMES = {
     "CON", "PRN", "AUX", "NUL",
@@ -60,10 +45,7 @@ _WINDOWS_RESERVED_NAMES = {
 
 
 def sanitize_path_token(value: Any, *, fallback: str = "unnamed") -> str:
-    """This function checks the name of a ply, interface or specimen.
-    And if ilegal names like "0/90" are used, these are checked and cleaned
-    up. 
-    """
+    """Make a name safe as a folder name on any OS, e.g. ``"0/90"`` becomes ``"0_90"``."""
     original = str(value)
     token = _ILLEGAL_PATH_CHARS.sub("_", original).strip(" .")
     if token.upper() in _WINDOWS_RESERVED_NAMES:
@@ -81,10 +63,7 @@ def sanitize_path_token(value: Any, *, fallback: str = "unnamed") -> str:
 
 
 def rgba_from_hex(hex_color: str, alpha: float = 1.0) -> Color:
-    """Convert ``#RRGGBB`` + alpha into an RGBA tuple (each entry 0-1).
-    This is just a helper function to define colours for plies and interfaces
-    for output visualization.
-    """
+    """Convert ``#RRGGBB`` and an alpha into an RGBA tuple with values in ``[0, 1]``."""
     hex_color = hex_color.lstrip("#")
     if len(hex_color) != 6:
         raise ValueError("hex_color must be in the form #RRGGBB")
@@ -102,9 +81,7 @@ DEFAULT_SECONDARY_DELAMINATION_COLOR: Color = rgba_from_hex("#1E88E5", 0.75)
 
 
 def _select_strain_column(df: pd.DataFrame, *, source: str) -> pd.DataFrame:
-    """Finds the ``strain_y`` column and returns it as its own single-column DataFrame.
-
-    """
+    """Return the ``strain_y`` column of ``df`` as a one-column DataFrame."""
     if "strain_y" not in df.columns:
         raise ValueError(
             f"{source} must contain a 'strain_y' column; found columns: {list(df.columns)}"
@@ -112,49 +89,30 @@ def _select_strain_column(df: pd.DataFrame, *, source: str) -> pd.DataFrame:
     return df[["strain_y"]]
 
 
-if sys.version_info >= (3, 10):
-    _dataclass = dataclass
-    _dataclass_kwargs = {"slots": True}
-else:
-    _dataclass = dataclass
-    _dataclass_kwargs = {}
-
-
-@_dataclass(**_dataclass_kwargs)
+@dataclass(slots=True)
 class Ply:
-    """Metadata for a single ply/layer in the laminate.
-
-    A `Ply` is the unit used for crack detection. The `orientation_deg` defines
-    which crack direction is targeted for this ply.
+    """One ply of the laminate, the unit of crack detection.
 
     Attributes
     ----------
     name:
-        Ply name 
+        Ply name.
     orientation_deg:
-        Ply orientation in degrees. This is used to select the crack direction
-        to be detected for this ply.
+        Fiber angle in degrees; sets the crack direction to detect.
     avg_crack_width_px:
-        Expected average crack width in pixels. Used as a tuning parameter for
-        crack detection.
+        Expected crack width in pixels, used to tune crack detection.
     min_crack_length_px:
-        Minimum crack length in pixels for a detected feature
+        Shortest crack, in pixels, that is kept.
     color_rgba:
-        RGBA color used to visualize this ply in plots.
+        Color of the ply in plots.
     crack_color_rgba:
-        RGBA color used to visualize cracks associated with this ply.
+        Color of this ply's cracks in plots.
     metadata:
-        Free-form dictionary for extra user-defined information.
-    
+        Free-form dict for your own data.
 
     Example
     -------
-    >>> Ply(
-    ...     name="plus45",
-    ...     orientation_deg=45.0,
-    ...     avg_crack_width_px=8.0,
-    ...     min_crack_length_px=20.0,
-    ... )
+    >>> Ply(name="plus45", orientation_deg=45.0, avg_crack_width_px=8.0, min_crack_length_px=20.0)
     """
 
     name: str
@@ -166,31 +124,24 @@ class Ply:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-@_dataclass(**_dataclass_kwargs)
+@dataclass(slots=True)
 class Interface:
-    """Description of a delamination interface between two plies.
-
-    An `Interface` represents a potential delamination plane in the laminate.
-    Optionally, it can be linked to the plies above and below via their indices.
+    """A potential delamination plane between two plies.
 
     Attributes
     ----------
     name:
-        Name of the interface, e.g. `"0/90"`.
-    upper_ply_index:
-        Index of the ply above this interface in the specimen ply list. If `None`,
-        the interface is not explicitly linked to a specific ply.
-    lower_ply_index:
-        Index of the ply below this interface in the specimen ply list. If `None`,
-        the interface is not explicitly linked to a specific ply.
+        Interface name, e.g. ``"0/90"``.
+    upper_ply_index, lower_ply_index:
+        Indices of the plies above and below in ``Specimen.plies``, or
+        ``None`` if not linked to a ply.
     enabled:
-        If `False`, this interface is ignored during delamination detection.
+        Set to ``False`` to skip this interface.
     delamination_color_rgba:
-        RGBA color used to visualize delaminations associated with this interface.
+        Color of this interface's delamination in plots.
     metadata:
-        Free-form dictionary for extra user-defined information. Deladect already uses
-        by default to save some metadata such as previous saved results and delamination
-        masks.
+        Free-form dict. DelaDect also records the paths of saved masks
+        and metrics here.
 
     Example
     -------
@@ -205,39 +156,62 @@ class Interface:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-@_dataclass(**_dataclass_kwargs)
+@dataclass(slots=True)
 class Specimen:
-    """Specimen class used to manage crack/delamination workflows for a single laminate specimen.
+    """A laminate specimen: its image stacks, plies and interfaces.
 
-    The class centralizes specimen metadata, image stacks, ply/interface definitions,
-    and export-related helpers. Detection algorithms are implemented in
-    `deladect.detection` and use the `Specimen` class as input.
+    Detection functions in :mod:`deladect.detection` take a ``Specimen``
+    as input. Creating one loads the image stacks but writes nothing to
+    disk.
 
-    Args:
-        name: Identifier for the specimen (used in filenames and manifests).
-        scale_px_mm: Conversion factor from millimetres to pixels (px/mm). If
-            omitted, defaults to ``1.0`` and a warning is emitted, since all
-            length/area/spacing results will then be reported in pixels
-            rather than millimetres.
-        path_full: Directory containing the full specimen view frames (required).
-        path_upper_border: Directory with images describing the upper border (optional).
-        path_lower_border: Directory with images describing the lower border (optional).
-        path_middle: Directory with frames of the middle region used for crack analysis (optional).
-        sorting_key: Key passed to :func:`crackdect.sort_paths` to order image stacks.
-        image_types: Iterable of image suffixes/extensions to include (e.g. ``[".png"]``).
-        avg_crack_width_px: Nominal average crack width in pixels for the specimen .
-        dimensions: Optional mapping with geometric info in millimeters. Accepted keys include
-            ``width_mm``/``width`` and ``height_mm``/``length_mm``/``height``/``length``.
-        strain_csv: Optional CSV file containing a ``strain_y`` column to merge later.
-        stack_backend: ``"auto"``, ``"memory"`` or ``"sql"`` choice for stack storage.
-        stack_limit_mb: Memory ceiling (MB) before ``"auto"`` flips to SQL-backed stacks.
-        sql_stack_kwargs: Extra keyword arguments forwarded to :meth:`ImageStackSQL.from_paths`.
-        plies: Optional list of pre-defined :class:`Ply` records.
-        interfaces: Optional list of :class:`Interface` entries.
-        crack_color_rgba: Default crack colour applied when a ply doesn't override it.
+    Parameters
+    ----------
+    name:
+        Specimen name, used for the results folder and file names.
+    scale_px_mm:
+        Image scale in pixels per millimeter. If omitted it is set to
+        ``1.0`` with a warning, and all results are in pixels.
+    path_full:
+        Folder with the full-view frames.
+    image_types:
+        Image extensions to load, e.g. ``["png"]``.
+    sorting_key:
+        Text that follows the frame number in the file names, e.g.
+        ``"_sc"`` for ``0145_sc.png``. Used to sort the frames.
+    path_upper_border, path_lower_border, path_middle:
+        Optional folders with the same frames cropped to the upper edge,
+        lower edge and middle. When all three are given, edge detection
+        uses the borders and crack/diffuse detection uses the middle.
+    avg_crack_width_px:
+        Default crack width in pixels for plies that don't set their own.
+    dimensions:
+        Optional specimen geometry. It is saved with the specimen but not
+        used by detection.
+    strain_csv:
+        Optional CSV with a ``strain_y`` column, added to exported metrics.
+    stack_backend:
+        ``"memory"``, ``"sql"`` or ``"auto"`` (SQL once the stack would
+        exceed ``stack_limit_mb``).
+    stack_limit_mb:
+        Size limit for ``stack_backend="auto"``.
+    sql_stack_kwargs:
+        Extra arguments for ``crackdect.ImageStackSQL.from_paths``.
+    results_root:
+        Folder that holds the results (default ``./results``); the
+        specimen writes to ``<results_root>/<name>``.
+    plies, interfaces:
+        Initial plies and interfaces. Missing interface ply indices are
+        inferred as in :meth:`add_interface`.
+    crack_color_rgba:
+        Default crack color for new plies.
+    auto_init_stacks:
+        Load the image stacks on construction.
 
-    Raises:
-        ValueError: If ``stack_backend`` is not recognised.
+    Raises
+    ------
+    ValueError
+        If ``stack_backend`` is unknown, no images are found, or the
+        region folders don't contain the same frames.
 
     Example
     -------
@@ -245,14 +219,11 @@ class Specimen:
     ...     name="sample_01",
     ...     scale_px_mm=35.0,
     ...     path_full="data/sample_01/full",
-    ...     path_upper_border=None,
-    ...     path_lower_border=None,so 
-    ...     path_middle=None,
-    ...     sorting_key="frame_idx",
-    ...     image_types=[".png"],
+    ...     image_types=["png"],
     ... )
-    >>> specimen.add_ply(name="plus45", orientation_deg=45.0)
-    >>> specimen.add_interface(name="top_interface", upper_ply=0, lower_ply=0)
+    >>> ply0 = specimen.add_ply(name="ply_0", orientation_deg=0.0)
+    >>> ply90 = specimen.add_ply(name="ply_90", orientation_deg=90.0)
+    >>> specimen.add_interface(name="0/90", upper_ply=ply0, lower_ply=ply90)
     """
 
     name: str
@@ -291,11 +262,9 @@ class Specimen:
     _region_frame_keys: Dict[str, List[Any]] = field(init=False, default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Validate the stack configuration and load optional metadata.
+        """Validate the settings, load the stacks and optional strain data.
 
-        Construction is intentionally in-memory: creating a :class:`Specimen`
-        never creates result folders or writes a configuration file.  Call
-        :meth:`save_config` when the specimen definition is complete.
+        Nothing is written to disk; call :meth:`save_config` for that.
         """
         if self.scale_px_mm is None:
             warnings.warn(
@@ -327,14 +296,9 @@ class Specimen:
         self._normalize_interface_indices()
 
     def _build_results_root(self, results_root: Optional[str]) -> Path:
-        """Builds the the specimen results root path. This is just a pure path
-        builder. To not be confused with the other results methods.
-        """
-        if results_root is None:
-            configured = self.results_root
-            base = Path("results").resolve() if configured is None else Path(configured).resolve()
-        else:
-            base = Path(results_root).resolve()
+        """Return ``<results_root>/<name>`` without creating it."""
+        root = self.results_root if results_root is None else results_root
+        base = Path("results" if root is None else root).resolve()
         specimen_name = self._validate_result_component(self.name, label="specimen name")
         if base.name != specimen_name:
             base = base / specimen_name
@@ -356,27 +320,15 @@ class Specimen:
             )
         return component
 
-    def _resolve_results_root(self, results_root: Optional[str] = None) -> Path:
-        """Return (and create) the base results folder, optionally overridden.
+    def results_dir(self, *parts: str, results_root: Optional[str] = None) -> Path:
+        """Return a folder inside the specimen's results, creating it if needed.
 
-        Internal helper for :meth:`results_dir`. Use :meth:`results_root_path`
-        instead if you just want to know the path without creating it.
+        Each of ``parts`` must be a single folder name. ``results_root``
+        writes under a different root instead. :meth:`results_root_path`
+        gives the root without creating it.
         """
         base = self._build_results_root(results_root)
         base.mkdir(parents=True, exist_ok=True)
-        return base
-
-    def results_dir(self, *parts: str, results_root: Optional[str] = None) -> Path:
-        """Return a writable directory contained in this specimen's result root.
-
-        Creates the directory (and the results root itself) if it doesn't
-        already exist. Each ``parts`` entry must be a single relative
-        directory component. Use ``results_root`` to intentionally select a
-        different output root than the specimen's own. For a read-only,
-        non-creating lookup of the specimen's own results root, use
-        :meth:`results_root_path` instead.
-        """
-        base = self._resolve_results_root(results_root)
         for part in parts:
             if part:
                 base /= self._validate_result_component(part, label="results directory part")
@@ -384,25 +336,19 @@ class Specimen:
         return base
 
     def results_root_path(self) -> Path:
-        """Return this specimen's own results root, without creating it.
-
-        Unlike :meth:`results_dir`, this never touches the filesystem — it's
-        a plain lookup of where results *would* go. Use :meth:`results_dir`
-        when you actually need the directory to exist.
-        """
+        """Return the specimen's results folder without creating it."""
         return Path(self._results_root)
 
     def config_path(self) -> Path:
-        """Return the default configuration path under results/config."""
+        """Path of the specimen's JSON config, ``<results>/config/<name>_config.json``."""
         config_dir = self.results_dir("config")
         name = self._validate_result_component(self.name, label="specimen name")
         return config_dir / f"{name}_config.json"
 
     def save_config(self) -> Path:
-        """Persist the current specimen configuration under results/config.
+        """Save the specimen definition to :meth:`config_path`.
 
-        This is explicit by design: mutations such as :meth:`add_ply` and
-        :meth:`add_interface` are not silently written to disk.
+        Changes such as :meth:`add_ply` are only written to disk by this call.
         """
         from deladect.io.specimen_io import save_specimen
 
@@ -411,22 +357,10 @@ class Specimen:
         return target
 
     def _emit_region_message(self) -> None:
-        """Log which stack regions are available for analysis.
-           This is only relevant if the user wants to use manually
-           include slices of the image instead of providing a full
-           image. However, if one of the upper, lower or middle regions
-           are provided, a warming message is shown if the user did not fully
-           define all of them.
-           
-        """
-        if any((self.path_upper_border, self.path_lower_border, self.path_middle)):
-            missing = []
-            if not self.path_upper_border:
-                missing.append("upper")
-            if not self.path_lower_border:
-                missing.append("lower")
-            if not self.path_middle:
-                missing.append("middle")
+        """Log which of the upper/lower/middle region folders were given."""
+        regions = {"upper": self.path_upper_border, "lower": self.path_lower_border, "middle": self.path_middle}
+        if any(regions.values()):
+            missing = [name for name, path in regions.items() if not path]
             message = "Performing analysis with manual overwritten images."
             if missing:
                 message += f" Missing regions: {', '.join(missing)}."
@@ -438,130 +372,58 @@ class Specimen:
                 "No region overrides provided; crack evaluation will use the full specimen stack."
             )
 
-    @staticmethod
-    def _estimate_stack_bytes(
-        paths: List[str],
-        *,
-        dtype: Any = np.float32,
-        as_gray: Optional[bool] = True,
-    ) -> int:
-        """This function estimates the memory footprint (bytes) for loading ``paths``.
-        Based on the estimated memory and the default value of ``stack_limit_mb``, the stack backend 
-        is selected when ``stack_backend="auto"``.
+    def _build_stack(self, paths: List[str]):
+        """Load ``paths`` as a grayscale float32 stack, in memory or SQL-backed.
+
+        With ``stack_backend="auto"`` the SQL backend is used when the stack
+        would exceed ``stack_limit_mb``.
         """
-        paths = list(paths)
-        if not paths:
-            return 0
-        sample = imread(paths[0], as_gray=as_gray) if as_gray is not None else imread(paths[0])
-        arr = np.asarray(sample, dtype=dtype) if dtype is not None else np.asarray(sample)
-        return int(arr.nbytes) * len(paths)
+        backend = self._stack_backend
+        if backend == "auto":
+            estimated_bytes = np.asarray(imread(paths[0], as_gray=True), dtype=np.float32).nbytes * len(paths)
+            too_big = self._stack_limit_bytes > 0 and estimated_bytes > self._stack_limit_bytes
+            backend = "sql" if too_big else "memory"
 
-    def _build_stack(
-        self,
-        paths: List[str],
-        *,
-        dtype: Any = np.float32,
-        as_gray: Optional[bool] = True,
-    ):
-        """Build an ImageStack or ImageStackSQL instance based on the backend."""
-        if _CRACKDECT_IMPORT_ERROR is not None:
-            raise RuntimeError(
-                "crackdect is required to build image stacks; install crackdect before instantiating Specimen."
-            ) from _CRACKDECT_IMPORT_ERROR
-
-        if ImageStack is None or ImageStackSQL is None:
-            raise RuntimeError("crackdect backends are unavailable.")
-
-        paths = list(paths)
-        if not paths:
-            raise ValueError("Cannot build an image stack without any image paths.")
-
-        selected = self._stack_backend
-        if selected == "auto":
-            est_bytes = self._estimate_stack_bytes(paths, dtype=dtype, as_gray=as_gray)
-            if self._stack_limit_bytes > 0 and est_bytes > self._stack_limit_bytes:
-                selected = "sql"
-            else:
-                selected = "memory"
-
-        if selected == "sql":
-            kwargs = dict(self._sql_stack_kwargs)
-            if dtype is not None and "dtype" not in kwargs:
-                kwargs["dtype"] = dtype
-            if as_gray is not None and "as_gray" not in kwargs:
-                kwargs["as_gray"] = as_gray
-            return ImageStackSQL.from_paths(paths, **kwargs)
-
-        if selected != "memory":
-            raise ValueError(f"Unsupported stack backend '{selected}'.")
-
-        kwargs = {}
-        if dtype is not None:
-            kwargs["dtype"] = dtype
-        if as_gray is not None:
-            kwargs["as_gray"] = as_gray
-        return ImageStack.from_paths(paths, **kwargs)
+        if backend == "sql":
+            return ImageStackSQL.from_paths(paths, **{"dtype": np.float32, "as_gray": True, **self._sql_stack_kwargs})
+        return ImageStack.from_paths(paths, dtype=np.float32, as_gray=True)
 
     @staticmethod
     def _normalize_image_types(image_types: Iterable[str]) -> List[str]:
-        """Normalize extensions to lowercase values without leading dots.
-        
-        ### Example:
-        [".PNG", " jpg ", "bmp", "", ".TIF"]
-        -> ["png", "jpg", "bmp", "tif"]
-
-        """
-        normalized: List[str] = []
-        for ext in image_types:
-            cleaned = str(ext).strip().lower()
-            if not cleaned:
-                continue
-            normalized.append(cleaned.lstrip("."))
-        return normalized
+        """Lowercase extensions and drop dots and blanks: ``[".PNG", " jpg ", ""]`` gives ``["png", "jpg"]``."""
+        cleaned = (str(ext).strip().lower() for ext in image_types)
+        return [ext.lstrip(".") for ext in cleaned if ext]
 
     def _initialize_image_stacks(self) -> None:
-        """Load the specimen's image stacks for full/upper/lower/middle regions."""
+        """Load the full, upper, lower and middle stacks (the last three if given)."""
         if _CRACKDECT_IMPORT_ERROR is not None:
-            # Defer raising until someone actually initialises image stacks.
             raise RuntimeError(
                 "crackdect is required to initialise specimen image stacks. "
                 "Install crackdect or override `_initialize_image_stacks`."
             ) from _CRACKDECT_IMPORT_ERROR
+        if self.path_full is None:
+            raise ValueError("Specimen requires a valid path_full to initialise the image stack.")
 
-        region_specs = (
-            ("full", self.path_full, np.float32, True),
-            ("upper", self.path_upper_border, np.float32, True),
-            ("lower", self.path_lower_border, np.float32, True),
-            ("middle", self.path_middle, np.float32, True),
+        regions = (
+            ("full", self.path_full),
+            ("upper", self.path_upper_border),
+            ("lower", self.path_lower_border),
+            ("middle", self.path_middle),
         )
-
-        for name, folder, dtype, as_gray in region_specs:
+        for name, folder in regions:
             if folder is None:
-                if name == "full":
-                    raise ValueError("Specimen requires a valid path_full to initialise the image stack.")
                 setattr(self, f"path_{name}_list", [])
                 setattr(self, f"image_stack_{name}", None)
-                continue
-            self._load_region_stack(
-                name=name,
-                folder=folder,
-                dtype=dtype,
-                as_gray=as_gray,
-            )
+            else:
+                self._load_region_stack(name, folder)
 
         self._validate_frame_alignment()
 
     def _validate_frame_alignment(self) -> None:
-        """Ensure regions with an initialized image stack refer to the same frames, in the same order.
+        """Raise if the region stacks don't contain the same frames in the same order.
 
-        Each region is sorted independently by :func:`crackdect.sort_paths`, so
-        nothing otherwise guarantees that e.g. the ``upper`` and ``middle``
-        stacks actually contain the same physical frames if one region is
-        missing an image. This compares the frame identity keys captured in
-        :meth:`_load_region_stack` (the frame number parsed from each filename
-        when available, else the filename itself) across every initialized
-        region and raises rather than silently proceeding with misaligned or
-        differently-sized stacks.
+        Each region is sorted separately, so a missing image in one folder
+        would otherwise shift it against the others.
         """
         region_keys = {
             name: keys
@@ -589,18 +451,12 @@ class Specimen:
                 f"Frame alignment mismatch: region '{name}' " + "; ".join(details) + "."
             )
 
-    def _load_region_stack(
-        self,
-        *,
-        name: str,
-        folder: str,
-        dtype: Any,
-        as_gray: Optional[bool],
-    ) -> None:
-        """Create an ImageStack for a single specimen region and attach it."""
-        if image_paths is None or sort_paths is None:
-            raise RuntimeError("crackdect helpers are required to discover image paths.")
+    def _load_region_stack(self, name: str, folder: str) -> None:
+        """Find, sort and load the images of one region.
 
+        Frames are identified by the number before ``sorting_key`` in the
+        filename, or by the filename if that isn't found.
+        """
         normalized_types = self._image_types_normalized or ["png", "jpg", "bmp"]
         paths = list(image_paths(folder, image_types=normalized_types))
         if not paths:
@@ -609,8 +465,6 @@ class Specimen:
         sorted_paths, numbers = sort_paths(paths, sorting_key=self.sorting_key)
         if sorted_paths.size == 0:
             paths_list = sorted(map(str, paths))
- 
-            # fall back to the filename
             frame_keys: List[Any] = [Path(p).stem for p in paths_list]
         else:
             paths_list = [str(p) for p in sorted_paths]
@@ -618,23 +472,13 @@ class Specimen:
         setattr(self, f"path_{name}_list", paths_list)
         self._region_frame_keys[name] = frame_keys
 
-        stack = self._build_stack(paths_list, dtype=dtype, as_gray=as_gray)
-        setattr(self, f"image_stack_{name}", stack)
+        setattr(self, f"image_stack_{name}", self._build_stack(paths_list))
 
-    # ----------
-    # Serialization helpers (config + metadata paths)
-    # ----------
-    # These helpers persist/rebuild the specimen definition itself.
-    # Heavy artefacts (crack bundles, delamination masks) are stored separately
-    # as NPZ/CSV files; only their paths are serialized via ply/interface metadata.
-
+    # Serialization. Large results (crack bundles, masks) live in NPZ/CSV
+    # files; only their paths are serialized, via ply/interface metadata.
 
     def to_dict(self) -> Dict[str, Any]:
-        """Return a JSON-serializable snapshot of this specimen.
-
-        The payload includes specimen configuration, ply/interface definitions,
-        and metadata dictionaries. Image-stack arrays are not embedded in JSON.
-        """
+        """Return the specimen definition as a JSON-serializable dict (without image data)."""
         return {
             "name": self.name,
             "scale_px_mm": self.scale_px_mm,
@@ -661,25 +505,19 @@ class Specimen:
     def from_dict(cls, payload: Dict[str, Any], *, auto_init_stacks: Optional[bool] = None) -> "Specimen":
         """Rebuild a specimen from :meth:`to_dict` output.
 
-        Notes
-        -----
-        - Ply/interface metadata is restored as stored.
-        - If ``auto_init_stacks`` is provided, it overrides the serialized value.
+        ``auto_init_stacks``, if given, overrides the saved value.
         """
-        plies_payload = payload.get("plies", [])
-        interfaces_payload = payload.get("interfaces", [])
         specimen_kwargs = dict(payload)
-        specimen_kwargs["plies"] = [cls._ply_from_dict(data) for data in plies_payload]
-        specimen_kwargs["interfaces"] = [cls._interface_from_dict(data) for data in interfaces_payload]
-        specimen_kwargs["crack_color_rgba"] = tuple(specimen_kwargs.get("crack_color_rgba", DEFAULT_CRACK_COLOR))
-        specimen_kwargs["auto_init_stacks"] = specimen_kwargs.get("auto_init_stacks", True)
+        specimen_kwargs["plies"] = [cls._ply_from_dict(data) for data in payload.get("plies", [])]
+        specimen_kwargs["interfaces"] = [cls._interface_from_dict(data) for data in payload.get("interfaces", [])]
+        specimen_kwargs["crack_color_rgba"] = tuple(payload.get("crack_color_rgba", DEFAULT_CRACK_COLOR))
+        specimen_kwargs.setdefault("auto_init_stacks", True)
         if auto_init_stacks is not None:
             specimen_kwargs["auto_init_stacks"] = auto_init_stacks
         return cls(**specimen_kwargs)
 
     @staticmethod
     def _ply_to_dict(ply: Ply) -> Dict[str, Any]:
-        """Serialize a :class:`Ply` into JSON-compatible primitives."""
         return {
             "name": ply.name,
             "orientation_deg": ply.orientation_deg,
@@ -692,10 +530,6 @@ class Specimen:
 
     @staticmethod
     def _ply_from_dict(payload: Dict[str, Any]) -> Ply:
-        """Deserialize a :class:`Ply` from :meth:`_ply_to_dict` output.
-
-        Missing optional fields fall back to module defaults.
-        """
         return Ply(
             name=payload["name"],
             orientation_deg=payload["orientation_deg"],
@@ -708,7 +542,6 @@ class Specimen:
 
     @staticmethod
     def _interface_to_dict(interface: Interface) -> Dict[str, Any]:
-        """Serialize an :class:`Interface` into JSON-compatible primitives."""
         return {
             "name": interface.name,
             "upper_ply_index": interface.upper_ply_index,
@@ -720,10 +553,6 @@ class Specimen:
 
     @staticmethod
     def _interface_from_dict(payload: Dict[str, Any]) -> Interface:
-        """Deserialize an :class:`Interface` from :meth:`_interface_to_dict` output.
-
-        Missing optional fields fall back to module defaults.
-        """
         return Interface(
             name=payload["name"],
             upper_ply_index=payload.get("upper_ply_index"),
@@ -735,11 +564,7 @@ class Specimen:
             metadata=payload.get("metadata", {}),
         )
 
-    # ----------
-    # Ply helpers.
-    # Below some ply related functions for adding, removing and other ply functionalities.
-    # ----------
-
+    # Plies
 
     def add_ply(
         self,
@@ -753,12 +578,14 @@ class Specimen:
         crack_color_rgba: Optional[Color] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Ply:
-        """Appends/adds a ply to a given specimen. If a Ply instance is not provided, 
-        a new one will be constructed from the keyword arguments.
+        """Add ``ply``, or create one from the keyword arguments.
+
+        ``avg_crack_width_px`` defaults to the specimen's value and
+        ``min_crack_length_px`` to twice the crack width.
 
         Example
         -------
-        >>> specimen.add_ply(name=\"plus45\", orientation_deg=45.0)
+        >>> specimen.add_ply(name="plus45", orientation_deg=45.0)
         """
         if ply is None:
             if name is None or orientation_deg is None:
@@ -784,30 +611,22 @@ class Specimen:
     def remove_ply(self, *, name: Optional[str] = None, index: Optional[int] = None) -> Ply:
         """Remove a ply by ``name`` or ``index``.
 
-        Firesafe behaviour: interfaces that reference the removed ply are marked
-        for review (indices left partially unresolved and ``enabled=False``), and
-        a runtime warning is emitted.
+        Interfaces attached to the removed ply are disabled and marked with
+        ``metadata["index_review_required"]``, and a warning lists them.
         """
         if name is None and index is None:
             raise ValueError("Provide either `name` or `index` when removing a ply.")
 
-        target_index: Optional[int] = None
         if name is not None:
-            for idx, candidate in enumerate(self.plies):
-                if candidate.name == name:
-                    target_index = idx
-                    break
+            target_index = next((idx for idx, ply in enumerate(self.plies) if ply.name == name), None)
             if target_index is None:
                 raise ValueError(f"No ply named '{name}' found.")
-        elif index is not None:
+        else:
             target_index = int(index)
             if target_index < 0:
                 target_index += len(self.plies)
-            if target_index < 0 or target_index >= len(self.plies):
+            if not 0 <= target_index < len(self.plies):
                 raise IndexError("ply index out of range")
-
-        if target_index is None:
-            raise ValueError("Invalid remove request.")
 
         removed = self.plies.pop(target_index)
         affected_interfaces = self._apply_ply_removal_to_interfaces(target_index)
@@ -822,29 +641,18 @@ class Specimen:
         return removed
 
     def _apply_ply_removal_to_interfaces(self, removed_index: int) -> List[str]:
-        """Update interface indices after a ply removal and flag affected entries."""
+        """Update interface ply indices after a removal; return the names of interfaces that used the removed ply."""
+
+        def shift(idx: Optional[int]) -> Optional[int]:
+            if idx is None or idx == removed_index:
+                return None
+            return idx - 1 if idx > removed_index else idx
+
         affected: List[str] = []
         for interface in self.interfaces:
-            upper = interface.upper_ply_index
-            lower = interface.lower_ply_index
-            touched_removed = False
-
-            if upper is not None:
-                if upper == removed_index:
-                    upper = None
-                    touched_removed = True
-                elif upper > removed_index:
-                    upper -= 1
-
-            if lower is not None:
-                if lower == removed_index:
-                    lower = None
-                    touched_removed = True
-                elif lower > removed_index:
-                    lower -= 1
-
-            interface.upper_ply_index = upper
-            interface.lower_ply_index = lower
+            touched_removed = removed_index in (interface.upper_ply_index, interface.lower_ply_index)
+            upper = interface.upper_ply_index = shift(interface.upper_ply_index)
+            lower = interface.lower_ply_index = shift(interface.lower_ply_index)
 
             if touched_removed:
                 interface.enabled = False
@@ -856,30 +664,24 @@ class Specimen:
         return affected
 
     def get_ply_by_name(self, name: str) -> Optional[Ply]:
-        """Return the first ply matching ``name`` (handy for CLI hooks)."""
+        """Return the first ply named ``name``, or ``None``."""
         return next((ply for ply in self.plies if ply.name == name), None)
 
     def get_ply_by_orientation(self, orientation_deg: float, *, tolerance: float = 1e-3) -> Optional[Ply]:
-        """Return the first ply whose orientation matches within ``tolerance`` degrees."""
+        """Return the first ply within ``tolerance`` degrees of ``orientation_deg``, or ``None``."""
         return next(
             (ply for ply in self.plies if abs(ply.orientation_deg - orientation_deg) <= tolerance),
             None,
         )
 
     def get_plies_by_orientation(self, orientation_deg: float, *, tolerance: float = 1e-3) -> List[Ply]:
-        """Return all plies whose orientation matches within ``tolerance`` degrees."""
+        """Return all plies within ``tolerance`` degrees of ``orientation_deg``."""
         return [ply for ply in self.plies if abs(ply.orientation_deg - orientation_deg) <= tolerance]
 
-    def iter_plies(self) -> Iterable[Ply]:
-        """Yield plies in their current stacking order."""
-        yield from self.plies
-
-    # ----------
-    # Interface helpers
-    # ----------
+    # Interfaces
 
     def _resolve_ply_index(self, value: Optional[Union[int, Ply]], *, label: str) -> Optional[int]:
-        """Resolve a ply-index argument that may be an int or a `Ply` object."""
+        """Turn a ply index or :class:`Ply` of this specimen into an index."""
         if value is None:
             return None
         if isinstance(value, Ply):
@@ -902,25 +704,18 @@ class Specimen:
         delamination_color_rgba: Optional[Color] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Interface:
-        """Append an interface, optionally constructing one from keyword arguments.
+        """Add ``interface``, or create one from the keyword arguments.
 
-        ``upper_ply``/``lower_ply`` accept either an integer index into
-        ``self.plies`` or the :class:`Ply` object itself (e.g. the value
-        returned by :meth:`add_ply`), which is resolved to its index.
-
-        When ply indices are omitted, DelaDect applies firesafe inference:
-
-        - both omitted: infer by interface order (``0/1``, ``1/2``, ...)
-        - one omitted: infer adjacent ply (``upper = lower - 1`` or
-          ``lower = upper + 1``)
+        ``upper_ply`` and ``lower_ply`` take an index into ``plies`` or a
+        :class:`Ply` object. Missing indices are inferred: with both missing,
+        the n-th interface goes between plies n and n+1; with one missing, the
+        adjacent ply is used.
 
         Example
         -------
-        >>> specimen.add_interface(name=\"0/90\", upper_ply=0, lower_ply=1)
-        >>> specimen.add_interface(name=\"top_interface\")
-        >>> ply0 = specimen.add_ply(name=\"ply_0\", orientation_deg=0.0)
-        >>> ply90 = specimen.add_ply(name=\"ply_90\", orientation_deg=90.0)
-        >>> specimen.add_interface(name=\"0/90\", upper_ply=ply0, lower_ply=ply90)
+        >>> ply0 = specimen.add_ply(name="ply_0", orientation_deg=0.0)
+        >>> ply90 = specimen.add_ply(name="ply_90", orientation_deg=90.0)
+        >>> specimen.add_interface(name="0/90", upper_ply=ply0, lower_ply=ply90)
         """
         if interface is None:
             if name is None:
@@ -947,9 +742,9 @@ class Specimen:
         return interface
 
     def _normalize_interface_indices(self) -> None:
-        """Normalize and validate existing interface ply indices."""
+        """Infer and check the ply indices of interfaces passed to the constructor."""
         for idx, interface in enumerate(self.interfaces):
-            allow_inference = not bool(interface.metadata.get("index_review_required", False))
+            allow_inference = not interface.metadata.get("index_review_required", False)
             upper, lower = self._resolve_interface_indices(
                 upper_ply_index=interface.upper_ply_index,
                 lower_ply_index=interface.lower_ply_index,
@@ -969,25 +764,24 @@ class Specimen:
         interface_name: str,
         allow_inference: bool = True,
     ) -> Tuple[Optional[int], Optional[int]]:
-        """Infer and validate ply indices for one interface."""
+        """Infer missing ply indices of one interface and check they are in range."""
         ply_count = len(self.plies)
 
         upper = None if upper_ply_index is None else int(upper_ply_index)
         lower = None if lower_ply_index is None else int(lower_ply_index)
 
-        if not allow_inference:
+        def check_range() -> Tuple[Optional[int], Optional[int]]:
             if ply_count > 0:
-                if upper is not None and not (0 <= upper < ply_count):
-                    raise ValueError(
-                        f"Interface '{interface_name}' upper_ply_index={upper} is out of range "
-                        f"for {ply_count} plies."
-                    )
-                if lower is not None and not (0 <= lower < ply_count):
-                    raise ValueError(
-                        f"Interface '{interface_name}' lower_ply_index={lower} is out of range "
-                        f"for {ply_count} plies."
-                    )
+                for label, value in (("upper", upper), ("lower", lower)):
+                    if value is not None and not 0 <= value < ply_count:
+                        raise ValueError(
+                            f"Interface '{interface_name}' {label}_ply_index={value} is out of range "
+                            f"for {ply_count} plies."
+                        )
             return upper, lower
+
+        if not allow_inference:
+            return check_range()
 
         if upper is None and lower is None:
             if ply_count >= 2 and interface_position < (ply_count - 1):
@@ -1003,53 +797,32 @@ class Specimen:
                 f"Defined interfaces exceed adjacent ply pairs ({ply_count - 1})."
             )
 
-        if upper is None and lower is not None:
+        if upper is None:
             upper = lower - 1
-        elif lower is None and upper is not None:
+        elif lower is None:
             lower = upper + 1
-
-        if upper is None or lower is None:
-            return upper, lower
-
-        if ply_count > 0:
-            if not (0 <= upper < ply_count):
-                raise ValueError(
-                    f"Interface '{interface_name}' upper_ply_index={upper} is out of range "
-                    f"for {ply_count} plies."
-                )
-            if not (0 <= lower < ply_count):
-                raise ValueError(
-                    f"Interface '{interface_name}' lower_ply_index={lower} is out of range "
-                    f"for {ply_count} plies."
-                )
-
-        return upper, lower
+        return check_range()
 
     def remove_interface(self, *, name: Optional[str] = None, index: Optional[int] = None) -> Interface:
         """Remove an interface by ``name`` or ``index``."""
         if name is None and index is None:
             raise ValueError("Provide either `name` or `index` when removing an interface.")
-        if name is not None:
-            for idx, candidate in enumerate(self.interfaces):
-                if candidate.name == name:
-                    return self.interfaces.pop(idx)
-            raise ValueError(f"No interface named '{name}' found.")
-        if index is not None:
+        if name is None:
             return self.interfaces.pop(index)
-        raise ValueError("Invalid remove request.")
+        for idx, candidate in enumerate(self.interfaces):
+            if candidate.name == name:
+                return self.interfaces.pop(idx)
+        raise ValueError(f"No interface named '{name}' found.")
 
     def get_interface_by_name(self, name: str) -> Optional[Interface]:
-        """Return the first interface matching ``name``."""
+        """Return the first interface named ``name``, or ``None``."""
         return next((interface for interface in self.interfaces if interface.name == name), None)
 
     def iter_interfaces(self, *, enabled_only: bool = False) -> Iterable[Interface]:
-        """Yield interfaces, optionally filtering only the ones marked as ``enabled``."""
-        if not enabled_only:
-            yield from self.interfaces
-        else:
-            for interface in self.interfaces:
-                if interface.enabled:
-                    yield interface
+        """Iterate over the interfaces, or only the enabled ones."""
+        for interface in self.interfaces:
+            if interface.enabled or not enabled_only:
+                yield interface
 
     def upload_experimental_data(
         self,
@@ -1060,18 +833,17 @@ class Specimen:
         nf: Optional[int] = None,
         nstep: int = 1,
     ) -> pd.DataFrame:
-        """Load experimental strain data from CSV/Excel and persist it on the specimen."""
+        """Load the ``strain_y`` column from a CSV or Excel file, keeping rows ``n0:nf:nstep``."""
         if data_path.lower().endswith(".csv"):
             df = pd.read_csv(data_path)
         else:
             df = pd.read_excel(data_path, sheet_name=sheet_name)
-        df_filtered = _select_strain_column(df.loc[n0:nf:nstep], source=data_path).reset_index(drop=True)
-        self.experimental_data = df_filtered
-        return df_filtered
+        self.experimental_data = _select_strain_column(df.loc[n0:nf:nstep], source=data_path).reset_index(drop=True)
+        return self.experimental_data
 
     @staticmethod
     def join_cracks(*crack_lists: List[np.ndarray]) -> List[np.ndarray]:
-        """Join multiple crack lists frame by frame."""
+        """Merge several per-frame crack lists into one, frame by frame."""
         if not crack_lists:
             return []
         frame_count = len(crack_lists[0])
@@ -1084,9 +856,7 @@ class Specimen:
             joined.append(np.vstack(segments) if segments else np.empty((0, 2, 2)))
         return joined
 
-    # ----------
     # Convenience constructors
-    # ----------
 
     @classmethod
     def from_plus_minus(
@@ -1105,42 +875,37 @@ class Specimen:
         min_crack_length_px: Optional[float] = None,
         **kwargs: Any,
     ) -> "Specimen":
-        """Create a [+θ, -θ] laminate with two plies (optionally add 90°).
+        """Create a ``[+θ, -θ]`` laminate, optionally with a 90° ply below.
 
-        One interface is added automatically between ``+θ`` and ``-θ``. If
-        ``transverse_layer`` is ``True``, a second interface is added
-        between ``-θ`` and the 90° ply.
-
-        ``min_crack_length_px``, if given, is applied to every ply created
-        (equivalent to passing it to each :meth:`add_ply` call manually).
+        Interfaces are added between consecutive plies (``"45/-45"``,
+        ``"-45/90"``). ``min_crack_length_px`` applies to every ply; other
+        keyword arguments go to :class:`Specimen`.
 
         Example
         -------
         >>> Specimen.from_plus_minus(
-        ...     name=\"sample\",
+        ...     name="sample",
         ...     angle_deg=45,
         ...     scale_px_mm=40.0,
-        ...     path_full=\"cut_dir\",
-        ...     sorting_key=\"_frame\",
-        ...     image_types=[\".png\"],
+        ...     path_full="cut_dir",
+        ...     image_types=["png"],
         ... )
         """
         orientations = [angle_deg, -angle_deg]
         if transverse_layer:
             orientations.append(90.0)
-        specimen = cls._build_with_orientations(
+        specimen = cls(
             name=name,
-            orientations=orientations,
             scale_px_mm=scale_px_mm,
             path_full=path_full,
-            sorting_key=sorting_key,
-            image_types=image_types,
             path_upper_border=path_upper_border,
             path_lower_border=path_lower_border,
             path_middle=path_middle,
-            min_crack_length_px=min_crack_length_px,
+            sorting_key=sorting_key,
+            image_types=image_types,
             **kwargs,
         )
+        specimen._add_plies(orientations, min_crack_length_px)
         specimen._add_consecutive_interfaces(orientations)
         return specimen
 
@@ -1160,61 +925,22 @@ class Specimen:
         min_crack_length_px: Optional[float] = None,
         **kwargs: Any,
     ) -> "Specimen":
-        """Create a cross-ply laminate [0, 90].
+        """Create a ``[0, 90]`` cross-ply laminate with a ``"0/90"`` interface.
 
-        When ``angles`` is left at its default ``[0, 90]``, a single
-        ``"0/90"`` interface is added automatically between the two plies.
-        A custom ``angles`` sequence adds no interfaces; call
-        :meth:`add_interface` yourself in that case.
-
-        ``min_crack_length_px``, if given, is applied to every ply created
-        (equivalent to passing it to each :meth:`add_ply` call manually).
+        With custom ``angles`` the plies are created but no interfaces; add
+        them with :meth:`add_interface`. ``min_crack_length_px`` applies to
+        every ply; other keyword arguments go to :class:`Specimen`.
 
         Example
         -------
         >>> Specimen.from_cross_ply(
-        ...     name=\"cp_sample\",
+        ...     name="cp_sample",
         ...     scale_px_mm=40.0,
-        ...     path_full=\"cut_dir\",
-        ...     sorting_key=\"_frame\",
-        ...     image_types=[\".png\"],
+        ...     path_full="cut_dir",
+        ...     image_types=["png"],
         ... )
         """
         pattern = angles or [0.0, 90.0]
-        specimen = cls._build_with_orientations(
-            name=name,
-            orientations=pattern,
-            scale_px_mm=scale_px_mm,
-            path_full=path_full,
-            sorting_key=sorting_key,
-            image_types=image_types,
-            path_upper_border=path_upper_border,
-            path_lower_border=path_lower_border,
-            path_middle=path_middle,
-            min_crack_length_px=min_crack_length_px,
-            **kwargs,
-        )
-        if angles is None:
-            specimen._add_consecutive_interfaces(pattern)
-        return specimen
-
-    @classmethod
-    def _build_with_orientations(
-        cls,
-        *,
-        name: str,
-        orientations: Sequence[float],
-        scale_px_mm: Optional[float] = None,
-        path_full: str,
-        image_types: List[str],
-        sorting_key: str = "_sc",
-        path_upper_border: Optional[str] = None,
-        path_lower_border: Optional[str] = None,
-        path_middle: Optional[str] = None,
-        min_crack_length_px: Optional[float] = None,
-        **kwargs: Any,
-    ) -> "Specimen":
-        """Build a specimen and populate plies from an orientation sequence."""
         specimen = cls(
             name=name,
             scale_px_mm=scale_px_mm,
@@ -1226,29 +952,23 @@ class Specimen:
             image_types=image_types,
             **kwargs,
         )
-        for idx, orientation in enumerate(orientations):
-            specimen.add_ply(
-                name=f"ply_{idx}",
-                orientation_deg=float(orientation),
-                min_crack_length_px=min_crack_length_px,
-            )
+        specimen._add_plies(pattern, min_crack_length_px)
+        if angles is None:
+            specimen._add_consecutive_interfaces(pattern)
         return specimen
 
-    @staticmethod
-    def _format_angle(angle_deg: float) -> str:
-        """Render an orientation angle for interface naming, e.g. ``0``, ``-45``."""
-        return f"{angle_deg:g}"
+    def _add_plies(self, orientations: Sequence[float], min_crack_length_px: Optional[float]) -> None:
+        for idx, orientation in enumerate(orientations):
+            self.add_ply(name=f"ply_{idx}", orientation_deg=float(orientation), min_crack_length_px=min_crack_length_px)
 
     def _add_consecutive_interfaces(self, orientations: Sequence[float]) -> None:
-        """Add one interface between each pair of consecutive plies.
-
-        Used by the ``from_cross_ply``/``from_plus_minus`` convenience
-        constructors, whose ply count and order are known ahead of time, so
-        interfaces can be named unambiguously from the orientation pattern.
-        """
+        """Add an interface named ``"<upper angle>/<lower angle>"`` between each pair of adjacent plies."""
         for idx in range(len(orientations) - 1):
-            name = f"{self._format_angle(orientations[idx])}/{self._format_angle(orientations[idx + 1])}"
-            self.add_interface(name=name, upper_ply=idx, lower_ply=idx + 1)
+            self.add_interface(
+                name=f"{orientations[idx]:g}/{orientations[idx + 1]:g}",
+                upper_ply=idx,
+                lower_ply=idx + 1,
+            )
 
 
 __all__ = [

@@ -1,43 +1,35 @@
-"""Minimal crack-detection helpers layered on top of the legacy CrackDect pipeline.
+"""Crack detection with CrackDect.
 
-Entry points:
+:func:`crack_analysis` runs CrackDect once per ply orientation,
+:func:`crack_eval` runs it for one ply and :func:`plot_cracks` draws
+the result. The other functions compute crack spacing.
 
-* :func:`crack_eval` - run CrackDect for one ply orientation.
-* :func:`crack_analysis` - run CrackDect for every unique orientation in a specimen layup.
-* :func:`plot_cracks` - small Matplotlib helper to visualise detected segments.
+Cracks are segments ``[[row0, col0], [row1, col1]]``, i.e. ``[y, x]``.
 
-Coordinate convention
----------------------
-Crack segments are represented as ``[[row0, col0], [row1, col1]]`` (``[y, x]``).
-When plotting, columns map to the x-axis and rows map to the y-axis.
-
-Reference: CrackDect publication, https://doi.org/10.1016/j.softx.2021.100832
+CrackDect: https://doi.org/10.1016/j.softx.2021.100832
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
-
 import logging
+import warnings
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import warnings
 from skimage.io import imread
 
-from deladect.io.cracks import (
-    crack_results_subdir,
-    save_cracks as save_crack_bundle,
-)
+from deladect.io.cracks import crack_results_subdir, save_cracks as save_crack_bundle
 from deladect.specimen import Ply, Specimen
-from deladect.utils import draw_crack_segments
+from deladect.utils import crack_length, crack_mid_point, draw_crack_segments
 
 logger = logging.getLogger(__name__)
 
-try:  # pragma: no cover - optional dependency during tests
+try:
     from crackdect import detect_cracks_bender as _detect_cracks_bender
-except Exception:  # pragma: no cover
-    _detect_cracks_bender = None  # type: ignore[assignment]
+except Exception:
+    _detect_cracks_bender = None
 
 
 def crack_eval(
@@ -55,41 +47,43 @@ def crack_eval(
     color_cracks: str = "red",
     frame_labels: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Run CrackDect on one ply orientation.
+    """Detect the cracks of one ply with CrackDect.
 
-    The ply orientation (laminate convention, commonly in ``[-90, 90]``) is mapped
-    into CrackDect's detection angle by
-
-    ``theta_fd = (90 - ply.orientation_deg) % 180``.
+    The ply angle is converted to CrackDect's detection angle as
+    ``(90 - ply.orientation_deg) % 180``.
 
     Parameters
     ----------
     specimen:
-        Specimen containing the image stacks and output root.
+        Specimen with the image stacks.
     crack_width_px, min_crack_size_px:
-        Optional overrides for CrackDect filter and length thresholds.
-        If omitted, ply-level defaults are used.
+        Override the ply's crack width and minimum crack length.
     export_images:
-        If ``True``, write per-frame crack overlays.
+        Save a crack plot per frame.
     background:
-        If ``True``, draw overlays on top of grayscale frames.
+        Draw the frame behind the cracks in those plots.
     comparison:
-        If ``True``, duplicate the background horizontally in plots.
+        Show the frame twice side by side in those plots.
     save_cracks:
-        If ``True``, persist crack segments as ``.npz``.
+        Save the cracks to ``.npz`` and record the file on the ply.
     ply:
-        Ply being analysed. Required.
+        Ply to analyze (required).
     results_dir:
-        Optional result-root override.
+        Write results under this root instead of the specimen's.
     use_full_stack:
-        If ``True``, force full-stack detection. If ``False``, prefer middle-stack.
-        If ``None``, choose automatically.
+        ``True`` uses the full frames, ``False`` the middle region, and
+        ``None`` the middle region when it was given.
     color_cracks:
-        Matplotlib color for exported overlays.
+        Crack color in the plots.
+    frame_labels:
+        Labels used in the plot file names instead of the frame index.
+
     Returns
     -------
     dict[str, Any]
-        Dictionary containing cracks, per-frame metrics, output paths, and parameters.
+        ``cracks``, ``densities``, ``thresholds``, a per-frame ``metrics``
+        table, output ``paths``, the ``params`` used, ``orientation_deg``
+        and ``ply``.
     """
     if _detect_cracks_bender is None:
         raise ImportError("crackdect is required to run crack detection.")
@@ -98,18 +92,14 @@ def crack_eval(
 
     stack = _select_stack(specimen, use_full_stack)
     theta = _theta_from_ply(ply)
-    crack_width_source = (
-        crack_width_px
-        if crack_width_px is not None
-        else (ply.avg_crack_width_px or specimen.avg_crack_width_px or 10.0)
-    )
-    crack_width = int(round(float(crack_width_source)))
-    min_size_source = (
-        min_crack_size_px
-        if min_crack_size_px is not None
-        else (ply.min_crack_length_px if ply.min_crack_length_px is not None else max(crack_width * 2.0, crack_width))
-    )
-    min_size = int(round(float(min_size_source)))
+    if crack_width_px is None:
+        crack_width_px = ply.avg_crack_width_px or specimen.avg_crack_width_px or 10.0
+    crack_width = int(round(float(crack_width_px)))
+    if min_crack_size_px is None:
+        min_crack_size_px = (
+            ply.min_crack_length_px if ply.min_crack_length_px is not None else max(crack_width * 2.0, crack_width)
+        )
+    min_size = int(round(float(min_crack_size_px)))
 
     densities, cracks, thresholds = _detect_cracks_bender(
         stack,
@@ -126,37 +116,21 @@ def crack_eval(
     crack_bundle_path: Optional[str] = None
 
     if export_images:
-        plots_dir = crack_results_subdir(
-            specimen,
-            ply,
-            "plots",
-            results_root=results_dir,
-        )
+        plots_dir = crack_results_subdir(specimen, ply, "plots", results_root=results_dir)
         plots_path = str(plots_dir)
         for idx, crack in enumerate(cracks_list):
-            frame = stack[idx]
-            plot_result = plot_cracks(
-                frame,
+            label = frame_labels[idx] if frame_labels is not None else f"{idx:04d}"
+            _save_crack_plot(
+                stack[idx],
                 crack,
+                plots_dir / f"cracks_{label}.png",
                 background_flag=background,
                 color=color_cracks,
                 comparison=comparison,
             )
-            fig, ax = plot_result["figure"], plot_result["axes"]
-            ax.set_xlabel("x [Px]")
-            ax.set_ylabel("y [Px]")
-            label = frame_labels[idx] if frame_labels is not None else f"{idx:04d}"
-            fig.savefig(str(plots_dir / f"cracks_{label}.png"))
-            plt.close(fig)
 
     if save_cracks:
-        saved = save_crack_bundle(
-            specimen,
-            ply,
-            cracks_list,
-            results_root=results_dir,
-        )
-        crack_bundle_path = str(saved)
+        crack_bundle_path = str(save_crack_bundle(specimen, ply, cracks_list, results_root=results_dir))
 
     metrics = _build_crack_metrics_table(cracks_list, densities_list, thresholds_list)
     return {
@@ -181,7 +155,7 @@ def crack_eval(
 def _resolve_requested_plies(
     specimen: Specimen, plies: Sequence[Any]
 ) -> List[Ply]:
-    """Resolve a mixed sequence of ply names and :class:`Ply` objects."""
+    """Turn a list of ply names and :class:`Ply` objects into plies, raising for unknown names."""
     resolved: List[Ply] = []
     missing: List[str] = []
     for entry in plies:
@@ -208,17 +182,12 @@ def _build_crack_analysis_payload(
     ply: Ply,
     plies: List[Ply],
 ) -> Dict[str, Any]:
-    """Build one ``crack_analysis()`` result entry from a ``crack_eval()`` result."""
+    """Turn a :func:`crack_eval` result into one :func:`crack_analysis` entry."""
     return {
         "orientation_deg": orientation_deg,
         "ply": ply,
         "plies": plies,
-        "cracks": structured.get("cracks", []),
-        "densities": structured.get("densities", []),
-        "thresholds": structured.get("thresholds", []),
-        "metrics": structured.get("metrics"),
-        "paths": structured.get("paths", {}),
-        "params": structured.get("params", {}),
+        **{key: structured[key] for key in ("cracks", "densities", "thresholds", "metrics", "paths", "params")},
     }
 
 
@@ -239,25 +208,26 @@ def crack_analysis(
     color_cracks: str = "red",
     frame_labels: Optional[List[str]] = None,
 ) -> Dict[str, Dict[str, Any]]:
-    """Run crack detection once per unique orientation, or per requested ply.
+    """Detect cracks once per ply orientation, or once per requested ply.
 
-    By default (``orientations=None``, ``plies=None``), plies are grouped by
-    orientation (within ``tolerance``) and one representative ply per group is
-    used for detection. If a group has more than one ply, the first is used
-    and a warning is logged.
+    By default plies are grouped by orientation (within ``tolerance``)
+    and CrackDect runs once per group, using the group's first ply. A
+    warning is logged when a group has more than one ply.
 
-    ``orientations`` restricts detection to the given orientation angles
-    (e.g. ``[0.0, 90.0]``); this still uses one representative ply per
-    matched orientation group.
+    ``orientations`` limits detection to those angles, e.g.
+    ``[0.0, 90.0]``. ``plies`` instead runs detection on each given ply
+    (name or :class:`Ply`), which lets you pick a specific ply when
+    several share an orientation. The two can't be combined.
 
-    ``plies`` instead selects individual plies by name (``str``) or by
-    :class:`Ply` object, bypassing orientation grouping entirely. Use this
-    when a specimen has multiple plies at the same orientation and you need
-    to analyse a specific one rather than an arbitrary representative.
-    ``orientations`` and ``plies`` are mutually exclusive.
+    The other arguments are passed to :func:`crack_eval`.
 
-    Each result entry includes ``cracks``, ``densities``, ``thresholds``,
-    ``metrics``, ``paths``, and ``params``.
+    Returns
+    -------
+    dict[str, dict]
+        Keyed by orientation (e.g. ``"0"``, ``"90"``) or by ply name when
+        ``plies`` is given. Each entry holds ``cracks``, ``densities``,
+        ``thresholds``, ``metrics``, ``paths``, ``params``,
+        ``orientation_deg``, ``ply`` and ``plies``.
     """
     if orientations is not None and plies is not None:
         raise ValueError("Pass only one of `orientations` or `plies`, not both.")
@@ -291,15 +261,11 @@ def crack_analysis(
     groups = _group_plies_by_orientation(specimen, tolerance=tolerance)
     target_orientations = list(orientations) if orientations is not None else None
 
-    def _matches_target(angle: float) -> bool:
-        if target_orientations is None:
-            return True
-        return any(abs(angle - target) <= tolerance for target in target_orientations)
+    def matches_target(angle: float) -> bool:
+        return target_orientations is None or any(abs(angle - target) <= tolerance for target in target_orientations)
 
     for angle, group_plies in groups:
-        if not _matches_target(angle):
-            continue
-        if not group_plies:
+        if not matches_target(angle):
             continue
         primary = group_plies[0]
         if len(group_plies) > 1:
@@ -312,10 +278,9 @@ def crack_analysis(
                 len(group_plies) - 1,
                 duplicate_names,
             )
-            primary_signature = (primary.avg_crack_width_px, primary.min_crack_length_px)
+            primary_settings = (primary.avg_crack_width_px, primary.min_crack_length_px)
             for candidate in group_plies[1:]:
-                candidate_signature = (candidate.avg_crack_width_px, candidate.min_crack_length_px)
-                if candidate_signature != primary_signature:
+                if (candidate.avg_crack_width_px, candidate.min_crack_length_px) != primary_settings:
                     logger.warning(
                         "Duplicate ply '%s' at %.3f° has different crack settings; "
                         "using '%s' defaults.",
@@ -358,29 +323,25 @@ def plot_cracks(
     background_flag: bool = False,
     comparison: bool = False,
 ):
-    """Plot crack segments with an optional grayscale background.
-
-    This helper mirrors the visual style used in CrackDect examples and tests.
+    """Plot crack segments, optionally over the image.
 
     Parameters
     ----------
     image:
-        Background image array.
+        Frame the cracks were detected on.
     cracks:
-        Iterable of crack segments shaped ``(n, 2, 2)`` with ``(y, x)`` endpoints.
-    linewidth:
-        Width of crack lines.
-    color:
-        Matplotlib color for crack segments.
+        Segments of shape ``(n, 2, 2)`` with ``(y, x)`` end points.
+    linewidth, color:
+        Line style of the cracks.
     background_flag:
-        If ``True``, draw ``image`` before plotting cracks.
+        Draw ``image`` behind the cracks.
     comparison:
-        If ``True``, duplicate the frame horizontally for side-by-side comparisons.
+        Show the image twice side by side.
 
     Returns
     -------
     dict[str, Any]
-        ``{"figure": Figure, "axes": Axes}`` containing the rendered crack overlay.
+        ``{"figure": Figure, "axes": Axes}``.
     """
     fig, ax = plt.subplots()
     frame = image
@@ -398,27 +359,34 @@ def plot_cracks(
     return {"figure": fig, "axes": ax}
 
 
+def _save_crack_plot(image: np.ndarray, cracks: Sequence[np.ndarray], save_path, **plot_kwargs: Any) -> None:
+    plot_result = plot_cracks(image, cracks, **plot_kwargs)
+    fig, ax = plot_result["figure"], plot_result["axes"]
+    ax.set_xlabel("x [Px]")
+    ax.set_ylabel("y [Px]")
+    fig.savefig(str(save_path))
+    plt.close(fig)
+
+
 def _group_plies_by_orientation(
     specimen: Specimen,
     *,
     tolerance: float = 1e-3,
 ) -> List[Tuple[float, List[Ply]]]:
-    """Group specimen plies by orientation within ``tolerance`` degrees."""
+    """Group the plies whose angle is within ``tolerance`` of the first ply of a group."""
     groups: List[Tuple[float, List[Ply]]] = []
     for ply in specimen.plies:
-        matched = False
-        for idx, (angle, plies) in enumerate(groups):
+        for angle, plies in groups:
             if abs(ply.orientation_deg - angle) <= tolerance:
                 plies.append(ply)
-                matched = True
                 break
-        if not matched:
+        else:
             groups.append((float(ply.orientation_deg), [ply]))
     return groups
 
 
 def _orientation_label(angle: float) -> str:
-    """Return a stable string key for an orientation angle."""
+    """Key for an angle in the results dict: ``"90"`` for whole degrees, else e.g. ``"22.5"``."""
     if abs(angle - round(angle)) <= 1e-6:
         return str(int(round(angle)))
     return f"{angle:g}"
@@ -431,11 +399,10 @@ def order_cracks(
     image_height: int = 1,
     image_width: int = 1,
 ) -> np.ndarray:
-    """Order cracks by their minimum column (x-axis) coordinate.
+    """Sort cracks left to right by their smallest column.
 
-    Crack segments are represented as ``[row, col]``. Sorting by minimum column
-    orders cracks left-to-right, which is the spacing direction for near-vertical
-    crack families.
+    With ``delimiter``, vertical segments at the left and right image
+    borders are added, so spacing is also measured to the edges.
     """
     if len(crack_list) == 0:
         return crack_list
@@ -456,10 +423,12 @@ def crack_grouping(
     group_within_crack_width: bool = True,
     avg_crack_width_px: float = 10.0,
 ) -> np.ndarray:
-    """Group cracks that lie within ``threshold`` pixels of each other.
+    """Merge cracks that are close to each other along the columns.
 
-    Grouping is performed along the column axis (left-right distance) while keeping
-    output cracks in ``[row, col]`` format.
+    With ``group_within_crack_width``, cracks whose mean columns are
+    within twice the crack width become one vertical segment. Then
+    neighbors whose end points are within ``threshold`` pixels are
+    joined, as a vertical segment if ``generate_vertical_crack``.
     """
     if len(ordered_cracks) == 0:
         return ordered_cracks
@@ -510,17 +479,12 @@ def crack_grouping(
 
 
 def crack_filter(crack_list: List[np.ndarray], *, length_threshold: float) -> List[np.ndarray]:
-    """Filter cracks shorter than ``length_threshold``."""
-    from deladect.utils import crack_length
-
+    """Drop cracks shorter than ``length_threshold``."""
     return [crack for crack in crack_list if crack_length(crack) >= length_threshold]
 
 
 def compute_crack_spacing(crack_list: List[np.ndarray]) -> Dict[str, Any]:
-    """Compute crack spacing statistics from segment midpoints.
-
-    Spacing is measured along the column axis (x-axis / left-right distance).
-    Crack coordinates are expected in ``[row, col]`` format.
+    """Column distance between the midpoints of neighboring cracks.
 
     Returns
     -------
@@ -529,19 +493,9 @@ def compute_crack_spacing(crack_list: List[np.ndarray]) -> Dict[str, Any]:
     """
     if not crack_list:
         return {"spacing": [], "avg_spacing": 0.0, "std_spacing": 0.0}
-    from deladect.utils import crack_mid_point
 
-    raw_midpoints = [crack_mid_point(crack) for crack in crack_list]
-    midpoints: List[Tuple[float, float]] = []
-    for row_val, col_val in raw_midpoints:
-        if row_val is None or col_val is None:
-            continue
-        midpoints.append((float(cast(float, row_val)), float(cast(float, col_val))))
-    midpoints = sorted(midpoints, key=lambda pt: pt[1])
-    spacings = [
-        midpoints[idx + 1][1] - midpoints[idx][1]
-        for idx in range(len(midpoints) - 1)
-    ]
+    mid_cols = sorted(col for _, col in map(crack_mid_point, crack_list) if col is not None)
+    spacings = [right - left for left, right in zip(mid_cols, mid_cols[1:])]
     avg = float(np.mean(spacings)) if spacings else 0.0
     std = float(np.std(spacings)) if spacings else 0.0
     return {"spacing": spacings, "avg_spacing": avg, "std_spacing": std}
@@ -559,18 +513,18 @@ def crack_filtering_postprocessing(
     grouping: bool = False,
     results_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Post-process crack frames and compute spacing statistics.
+    """Filter the cracks of every frame and compute the crack spacing.
 
-    The routine can order cracks, apply length filtering, optionally group nearby
-    segments, compute spacing statistics, remove outliers (IQR rule), and optionally
-    export overlay plots.
+    Each frame's cracks are sorted, filtered by length, optionally
+    grouped, and their spacing computed. With ``remove_outliers`` the
+    mean and standard deviation ignore spacings outside 1.5 IQR.
+    Spacings are converted to millimeters with ``specimen.scale_px_mm``.
 
     Returns
     -------
     dict[str, Any]
-        ``{"records": list[dict[str, Any]], "filtered_frames": list[list[np.ndarray]]}``
-        where ``records`` contains per-frame spacing metrics and ``filtered_frames``
-        stores the filtered crack lists.
+        ``{"records": [...], "filtered_frames": [...]}``: one spacing
+        record and one filtered crack list per frame.
     """
     if not cracks:
         return {"records": [], "filtered_frames": []}
@@ -583,33 +537,20 @@ def crack_filtering_postprocessing(
     records: List[Dict[str, Any]] = []
     filtered_frames: List[List[np.ndarray]] = []
 
-    plots_dir = None
-    if export_images:
-        plots_dir = specimen.results_dir(
-            "plots",
-            "filtered_cracks",
-            results_root=results_dir,
-        )
+    plots_dir = specimen.results_dir("plots", "filtered_cracks", results_root=results_dir) if export_images else None
 
     for idx, frame_cracks in enumerate(cracks):
-        ordered = order_cracks(
-            frame_cracks,
-            delimiter=True,
-            image_height=height,
-            image_width=width,
-        )
+        ordered = order_cracks(frame_cracks, delimiter=True, image_height=height, image_width=width)
         filtered = crack_filter(list(ordered), length_threshold=crack_length_th)
-        grouped = (
-            crack_grouping(
-                np.asarray(filtered),
+        grouped = np.asarray(filtered)
+        if grouping:
+            grouped = crack_grouping(
+                grouped,
                 threshold=avg_crack_grouping_th_px,
                 generate_vertical_crack=True,
                 group_within_crack_width=True,
                 avg_crack_width_px=specimen.avg_crack_width_px,
             )
-            if grouping
-            else np.asarray(filtered)
-        )
 
         spacing_result = compute_crack_spacing(list(grouped))
         spacing = spacing_result["spacing"]
@@ -620,11 +561,10 @@ def crack_filtering_postprocessing(
             spacing_array = np.asarray(spacing)
             q1, q3 = np.percentile(spacing_array, [25, 75])
             iqr = q3 - q1
-            mask = (spacing_array >= q1 - 1.5 * iqr) & (spacing_array <= q3 + 1.5 * iqr)
-            filtered_spacing = spacing_array[mask]
-            if filtered_spacing.size:
-                avg_spacing = float(np.mean(filtered_spacing))
-                std_spacing = float(np.std(filtered_spacing))
+            inliers = spacing_array[(spacing_array >= q1 - 1.5 * iqr) & (spacing_array <= q3 + 1.5 * iqr)]
+            if inliers.size:
+                avg_spacing = float(np.mean(inliers))
+                std_spacing = float(np.std(inliers))
 
         records.append(
             {
@@ -635,35 +575,24 @@ def crack_filtering_postprocessing(
         )
         filtered_frames.append(filtered)
 
-        if export_images and plots_dir is not None:
-            plot_result = plot_cracks(
-                image,
-                filtered,
-                color="black",
-                background_flag=background,
+        if plots_dir is not None:
+            _save_crack_plot(
+                image, filtered, plots_dir / f"filtered_{idx:04d}.png", color="black", background_flag=background
             )
-            fig, ax = plot_result["figure"], plot_result["axes"]
-            ax.set_xlabel("x [Px]")
-            ax.set_ylabel("y [Px]")
-            fig.savefig(str(plots_dir / f"filtered_{idx:04d}.png"))
-            plt.close(fig)
 
     return {"records": records, "filtered_frames": filtered_frames}
 
 
 def pixels_to_length(input_data: List[Any], *, scale_px_mm: float) -> Dict[str, Any]:
-    """Convert crack-related data from pixels to millimetres.
+    """Divide pixel values by ``scale_px_mm``.
 
-    ``input_data`` can be either:
-
-    - a list of numeric values (for direct scaling), or
-    - a list of spacing dictionaries with ``Avg_spacing`` and ``Std_spacing`` keys.
+    ``input_data`` is either a list of numbers or a list of spacing
+    records with ``Avg_spacing`` and ``Std_spacing`` keys.
 
     Returns
     -------
     dict[str, Any]
-        ``{"values": list[Any]}`` holding the scaled values (floats or dicts,
-        matching the shape of ``input_data``'s entries).
+        ``{"values": [...]}`` in the same form as ``input_data``.
     """
     if all(isinstance(value, (int, float)) for value in input_data):
         return {"values": [value / scale_px_mm for value in input_data]}
@@ -681,17 +610,12 @@ def pixels_to_length(input_data: List[Any], *, scale_px_mm: float) -> Dict[str, 
     return {"values": scaled}
 
 
-# ----------
-# Internal helpers
-# ----------
-
-
 def _build_crack_metrics_table(
     cracks: List[Sequence[np.ndarray]],
     densities: List[float],
     thresholds: List[float],
 ) -> pd.DataFrame:
-    """Build a per-frame crack metrics table for structured outputs."""
+    """Table with one row per frame: crack count, crack density ``rho`` and its threshold."""
     rows: List[Dict[str, Any]] = []
     frame_count = max(len(cracks), len(densities), len(thresholds))
     for frame_idx in range(frame_count):
@@ -708,20 +632,15 @@ def _build_crack_metrics_table(
 
 
 def _select_stack(specimen: Specimen, use_full_stack: Optional[bool]):
-    """Select middle/full image stack with deterministic fallback warnings."""
-    middle_stack = getattr(specimen, "image_stack_middle", None)
-    full_stack = getattr(specimen, "image_stack_full", None)
-
+    """Stack to detect cracks on: the middle region by default, else the full frames."""
+    stacks = {
+        "middle": getattr(specimen, "image_stack_middle", None),
+        "full": getattr(specimen, "image_stack_full", None),
+    }
     if use_full_stack is None:
-        # auto mode: prefer already-loaded middle stack if available
-        if middle_stack is not None:
-            use_full = False
-        elif full_stack is not None:
-            use_full = True
-        else:
+        if stacks["middle"] is None and stacks["full"] is None:
             raise ValueError("Specimen has no image stack for region 'path_full' or 'path_middle'.")
-    else:
-        use_full = use_full_stack
+        use_full_stack = stacks["middle"] is None
 
     if specimen.path_middle is None and (specimen.path_upper_border or specimen.path_lower_border):
         warnings.warn(
@@ -730,35 +649,22 @@ def _select_stack(specimen: Specimen, use_full_stack: Optional[bool]):
             stacklevel=3,
         )
 
-    if not use_full:
-        if middle_stack is not None:
-            return middle_stack
-        if full_stack is not None:
-            warnings.warn(
-                "Middle stack requested but no middle stack is available; using full stack instead.",
-                RuntimeWarning,
-                stacklevel=3,
-            )
-            return full_stack
-        raise ValueError("Specimen has no image stack for region 'path_middle' or 'path_full'.")
-
-    if full_stack is not None:
-        return full_stack
-    if middle_stack is not None:
+    wanted, fallback = ("full", "middle") if use_full_stack else ("middle", "full")
+    if stacks[wanted] is not None:
+        return stacks[wanted]
+    if stacks[fallback] is not None:
         warnings.warn(
-            "Full stack requested but no full stack is available; using middle stack instead.",
+            f"{wanted.capitalize()} stack requested but no {wanted} stack is available; using {fallback} stack instead.",
             RuntimeWarning,
             stacklevel=3,
         )
-        return middle_stack
-    raise ValueError("Specimen has no image stack for region 'path_full' or 'path_middle'.")
+        return stacks[fallback]
+    raise ValueError(f"Specimen has no image stack for region 'path_{wanted}' or 'path_{fallback}'.")
 
 
 def _theta_from_ply(ply: Ply) -> int:
-    """Map laminate ply angle to CrackDect detection angle."""
-    angle = float(ply.orientation_deg)
-    theta_fd = (90.0 - angle) % 180.0
-    return int(round(theta_fd))
+    """CrackDect detection angle for a ply: ``(90 - angle) % 180``."""
+    return int(round((90.0 - float(ply.orientation_deg)) % 180.0))
 
 
 __all__ = [

@@ -1,10 +1,10 @@
-"""Convenience helpers to persist and restore :class:`deladect.specimen.Specimen` objects."""
+"""Save a :class:`~deladect.specimen.Specimen` to JSON and load it back."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, TypeVar, Union
+from typing import Any, Callable, Dict, Optional, Union
 
 from .cracks import PLY_CRACK_RESULTS_KEY, load_ply_crack_results
 from .delamination import (
@@ -25,15 +25,22 @@ from .delamination import (
 from deladect.specimen import Specimen
 
 JsonLikePath = Union[str, Path]
-T = TypeVar("T")
+
+# (summary label, metadata key, loader, report key)
+_INTERFACE_ARTEFACTS = (
+    ("edge", INTERFACE_PRIMARY_MASKS_KEY, load_interface_primary_masks, "primary_masks"),
+    ("secondary", INTERFACE_SECONDARY_MASKS_KEY, load_interface_secondary_masks, "secondary_masks"),
+    ("diffuse_raw", INTERFACE_DIFFUSE_RAW_MASKS_KEY, load_interface_diffuse_raw_masks, "diffuse_raw_masks"),
+    ("diffuse", INTERFACE_DIFFUSE_MASKS_KEY, load_interface_diffuse_masks, "diffuse_masks"),
+    ("combined", INTERFACE_COMBINED_MASKS_KEY, load_interface_combined_masks, "combined_masks"),
+)
 
 
 def save_specimen(specimen: Specimen, path: JsonLikePath) -> Path:
-    """Persist the specimen definition (plies, interfaces, metadata) to JSON."""
+    """Write the specimen definition (plies, interfaces, metadata) to a JSON file."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    payload = specimen.to_dict()
-    target.write_text(json.dumps(payload, indent=2))
+    target.write_text(json.dumps(specimen.to_dict(), indent=2))
     return target
 
 
@@ -42,26 +49,8 @@ def _emit(verbose: bool, message: str) -> None:
         print(message)
 
 
-def _safe_bundle_load(
-    *,
-    loader: Callable[[], T],
-    description: str,
-    strict: bool,
-    verbose: bool,
-) -> Optional[T]:
-    try:
-        bundle = loader()
-    except Exception as exc:
-        message = f"Failed to load {description}: {exc}"
-        if strict:
-            raise RuntimeError(message) from exc
-        _emit(verbose, message)
-        return None
-    return bundle
-
-
 def _unique_key(existing: Dict[str, Any], name: str) -> str:
-    """Create a stable key, suffixing duplicates as ``<name>_<n>``."""
+    """Return ``name``, or ``name_2``, ``name_3``, ... if it is already a key of ``existing``."""
     key = str(name)
     if key not in existing:
         return key
@@ -77,92 +66,72 @@ def load_stored_results(
     strict: bool = False,
     verbose: bool = False,
 ) -> Dict[str, Any]:
-    """Load all crack and delamination artefacts referenced in specimen metadata.
+    """Load every crack and delamination file recorded in the specimen's metadata.
 
     Parameters
     ----------
     specimen:
-        Specimen whose ply/interface metadata points to persisted artefacts.
+        Specimen whose plies and interfaces point to saved results.
     strict:
-        If ``True``, raise when a referenced artefact cannot be loaded.
-        If ``False``, keep going and report failures in ``summary``.
+        Raise if a file can't be loaded. Otherwise the failure is skipped
+        (and printed when ``verbose``).
     verbose:
-        If ``True``, print human-readable discovery/loading messages.
+        Print what was found.
 
     Returns
     -------
     dict[str, Any]
-        Nested dictionary with loaded bundles and a summary list.
+        ``{"plies": {...}, "interfaces": {...}, "summary": [str, ...]}``.
     """
-    report: Dict[str, Any] = {
-        "plies": {},
-        "interfaces": {},
-        "summary": [],
-    }
+    report: Dict[str, Any] = {"plies": {}, "interfaces": {}, "summary": []}
+
+    def load(loader: Callable[[Any], Any], target: Any, description: str) -> Optional[Any]:
+        try:
+            return loader(target)
+        except Exception as exc:
+            message = f"Failed to load {description}: {exc}"
+            if strict:
+                raise RuntimeError(message) from exc
+            _emit(verbose, message)
+            return None
+
+    def announce(message: str) -> None:
+        report["summary"].append(message)
+        _emit(verbose, message)
 
     for ply in specimen.plies:
-        ply_report: Dict[str, Any] = {}
-        if ply.metadata.get(PLY_CRACK_RESULTS_KEY):
-            bundle = _safe_bundle_load(
-                loader=lambda: load_ply_crack_results(ply),
-                description=f"cracks for ply '{ply.name}'",
-                strict=strict,
-                verbose=verbose,
-            )
-            if bundle is not None:
-                ply_report["cracks"] = bundle
-                msg = f"Found cracks for ply '{ply.name}' ({len(bundle)} frames)."
-                report["summary"].append(msg)
-                _emit(verbose, msg)
-        if ply_report:
-            report["plies"][_unique_key(report["plies"], ply.name)] = ply_report
-
-    interface_loaders = (
-        ("edge", INTERFACE_PRIMARY_MASKS_KEY, load_interface_primary_masks, "primary_masks"),
-        ("secondary", INTERFACE_SECONDARY_MASKS_KEY, load_interface_secondary_masks, "secondary_masks"),
-        ("diffuse_raw", INTERFACE_DIFFUSE_RAW_MASKS_KEY, load_interface_diffuse_raw_masks, "diffuse_raw_masks"),
-        ("diffuse", INTERFACE_DIFFUSE_MASKS_KEY, load_interface_diffuse_masks, "diffuse_masks"),
-        ("combined", INTERFACE_COMBINED_MASKS_KEY, load_interface_combined_masks, "combined_masks"),
-    )
+        if not ply.metadata.get(PLY_CRACK_RESULTS_KEY):
+            continue
+        bundle = load(load_ply_crack_results, ply, f"cracks for ply '{ply.name}'")
+        if bundle is not None:
+            announce(f"Found cracks for ply '{ply.name}' ({len(bundle)} frames).")
+            report["plies"][_unique_key(report["plies"], ply.name)] = {"cracks": bundle}
 
     for interface in specimen.interfaces:
         iface_report: Dict[str, Any] = {}
         found_labels = []
 
-        for label, key, loader, report_key in interface_loaders:
+        for label, key, loader, report_key in _INTERFACE_ARTEFACTS:
             if not interface.metadata.get(key):
                 continue
-            bundle = _safe_bundle_load(
-                loader=lambda loader=loader, interface=interface: loader(interface),
-                description=f"{label} delamination for interface '{interface.name}'",
-                strict=strict,
-                verbose=verbose,
-            )
-            if bundle is None:
-                continue
-            iface_report[report_key] = bundle
-            found_labels.append(f"{label} ({len(bundle)} frames)")
+            bundle = load(loader, interface, f"{label} delamination for interface '{interface.name}'")
+            if bundle is not None:
+                iface_report[report_key] = bundle
+                found_labels.append(f"{label} ({len(bundle)} frames)")
 
         metrics_path = interface.metadata.get(INTERFACE_METRICS_KEY)
         if metrics_path:
-            metrics = _safe_bundle_load(
-                loader=lambda interface=interface: load_interface_metrics(interface),
-                description=f"metrics for interface '{interface.name}'",
-                strict=strict,
-                verbose=verbose,
-            )
+            metrics = load(load_interface_metrics, interface, f"metrics for interface '{interface.name}'")
             if metrics is not None:
                 iface_report["metrics"] = metrics
                 iface_report["metrics_path"] = str(Path(metrics_path))
                 found_labels.append(f"metrics ({len(metrics)} rows)")
 
         if found_labels:
-            msg = (
+            announce(
                 f"Found edge/diffuse delamination artefacts for interface "
                 f"'{interface.name}': {', '.join(found_labels)}."
             )
-            report["summary"].append(msg)
-            _emit(verbose, msg)
             report["interfaces"][_unique_key(report["interfaces"], interface.name)] = iface_report
 
     return report
@@ -176,25 +145,21 @@ def load_specimen(
     strict: bool = False,
     verbose: bool = False,
 ) -> Specimen:
-    """Rebuild a specimen from a previously saved JSON snapshot.
+    """Rebuild a specimen from a JSON file written by :func:`save_specimen`.
 
     Parameters
     ----------
     path:
-        Path to a JSON snapshot previously produced by :func:`save_specimen`.
+        JSON file to read.
     auto_init_stacks:
-        If ``True``, initialize crackdect image stacks during reconstruction.
+        Load the image stacks as well.
     load_results:
-        If ``True``, eagerly load artefacts referenced in ply/interface metadata
-        and emit discovery messages when ``verbose=True``.
-    strict:
-        If ``True`` and ``load_results`` is enabled, raise when a referenced
-        artefact cannot be loaded.
-    verbose:
-        If ``True`` and ``load_results`` is enabled, print discovery messages.
+        Also load the result files recorded in the metadata, to check they
+        are readable.
+    strict, verbose:
+        Passed to :func:`load_stored_results` when ``load_results`` is set.
     """
-    source = Path(path)
-    payload = json.loads(source.read_text())
+    payload = json.loads(Path(path).read_text())
     specimen = Specimen.from_dict(payload, auto_init_stacks=auto_init_stacks)
     if load_results:
         load_stored_results(specimen, strict=strict, verbose=verbose)

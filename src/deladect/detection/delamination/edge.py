@@ -1,46 +1,35 @@
-"""Edge-focused delamination detection: :class:`EdgeDetector`.
-
-Depends on :mod:`._common`, :mod:`._overlays`, and :mod:`._preprocess`.
-"""
-
+"""Edge delamination detection: :class:`EdgeDetector`."""
 
 from __future__ import annotations
 
-import logging
+from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, Iterator, List, NamedTuple, Optional, Sequence, Tuple
 
 import numpy as np
 from scipy import ndimage as ndi
-from skimage.filters import unsharp_mask
 from skimage.morphology import closing, disk
 
-from deladect.io.delamination import (
-    save_mask_bundle,
-    store_interface_masks,
-)
-from deladect.specimen import (
-    Interface,
-)
-
-logger = logging.getLogger(__name__)
-
-from typing import TYPE_CHECKING
+from deladect.io.delamination import save_mask_bundle, store_interface_masks
+from deladect.specimen import Interface
 
 from ._common import (
+    _Progress,
     _auto_preprocess_cache_paths,
-    _build_primary_debug_payload,
     _ensure_uint8,
     _fetch_region_override_stacks,
-    _progress_done,
-    _progress_init,
-    _progress_update,
+    _hard_floor_mask,
+    _kmeans_split,
+    _minmax_otsu_threshold,
+    _percentile_range,
     _region_override_raw_frame,
     _resolve_hard_floor_ratio,
     _resolve_optional_float,
     _resolve_pair,
     _resolve_pos_scale,
     _result_key_token,
+    _scale_to_unit,
+    _smooth_for_threshold,
 )
 from ._overlays import (
     _interface_legend_label,
@@ -55,6 +44,23 @@ from ._preprocess import _reference_settings_from_cache_paths
 if TYPE_CHECKING:
     from .core import DelaminationDetector
 
+_SIDES = ("upper", "lower")
+
+_PRIMARY_DEBUG_KEYS: Tuple[str, ...] = (
+    "smoothed",
+    "constant_scaled",
+    "closed",
+    "threshold",
+    "hard_floor_eff",
+    "close_radius",
+    "min_object_px",
+    "binary",
+    "binary_closed",
+    "mask",
+    "primary_edge_snapshot",
+    "status",
+)
+
 
 def _rebuild_edge_connected_directional(
     mask: np.ndarray,
@@ -62,29 +68,25 @@ def _rebuild_edge_connected_directional(
     seed_depth: int,
     lateral_drift_px: int,
 ) -> np.ndarray:
-    """Rebuild an edge-connected mask using vertical-biased propagation.
+    """Keep the part of ``mask`` that grows down from the first ``seed_depth`` rows.
 
-    Growth is causal from top to bottom: each row can activate only candidate
-    pixels supported by the preceding accepted row within ``lateral_drift_px``
-    columns. Empty rows cannot be jumped.
+    A pixel is kept only if a kept pixel in the row above lies within
+    ``lateral_drift_px`` columns, so growth can't jump over empty rows.
     """
     mask_bool = np.asarray(mask, dtype=bool)
     if mask_bool.ndim != 2:
         raise ValueError("Directional edge reconstruction expects a 2D mask.")
 
-    height, _ = mask_bool.shape
+    height = mask_bool.shape[0]
     if height == 0:
-        return np.asarray(mask_bool, dtype=bool)
+        return mask_bool
 
     seed_rows = min(max(1, int(seed_depth)), height)
     drift = max(0, int(lateral_drift_px))
 
     rebuilt = np.zeros_like(mask_bool, dtype=bool)
     rebuilt[:seed_rows, :] = mask_bool[:seed_rows, :]
-    if seed_rows >= height:
-        return rebuilt
-
-    if drift <= 0:
+    if drift == 0:
         for row in range(seed_rows, height):
             rebuilt[row, :] = mask_bool[row, :] & rebuilt[row - 1, :]
         return rebuilt
@@ -96,43 +98,27 @@ def _rebuild_edge_connected_directional(
     return rebuilt
 
 
-def _rebuild_edge_connected_columnwise(
-    mask: np.ndarray,
-    *,
-    seed_depth: int,
-) -> np.ndarray:
-    """Rebuild an edge-connected mask without lateral or diagonal support.
-
-    Seed-strip candidates are accepted directly. Each subsequent candidate is
-    accepted only if the pixel immediately above it in the same column was
-    accepted. A gap therefore terminates growth in that column.
-    """
-    return _rebuild_edge_connected_directional(
-        mask,
-        seed_depth=seed_depth,
-        lateral_drift_px=0,
-    )
+def _rebuild_edge_connected_columnwise(mask: np.ndarray, *, seed_depth: int) -> np.ndarray:
+    """Like the directional version with no drift: each column grows on its own."""
+    return _rebuild_edge_connected_directional(mask, seed_depth=seed_depth, lateral_drift_px=0)
 
 
 def _remove_small_components(mask: np.ndarray, min_size: int) -> np.ndarray:
-    """Remove connected components smaller than ``min_size`` pixels."""
-    min_px = max(0, int(min_size))
+    """Remove connected regions smaller than ``min_size`` pixels."""
     cleaned = np.asarray(mask, dtype=bool)
-    if min_px <= 1:
+    if max(0, int(min_size)) <= 1:
         return cleaned
 
     labels, count = ndi.label(cleaned)
     if count <= 0:
         return cleaned
-
-    sizes = np.bincount(labels.ravel())
-    keep = sizes >= min_px
+    keep = np.bincount(labels.ravel()) >= int(min_size)
     keep[0] = False
     return keep[labels]
 
 
 def _filter_specimen_edge_connected(mask: np.ndarray) -> np.ndarray:
-    """Keep only mask pixels whose connected component touches row 0 (specimen free edge)."""
+    """Keep only the connected regions of ``mask`` that touch row 0, the specimen edge."""
     mask = np.asarray(mask, dtype=bool)
     if not np.any(mask):
         return mask
@@ -140,21 +126,50 @@ def _filter_specimen_edge_connected(mask: np.ndarray) -> np.ndarray:
     edge_labels = set(np.unique(labeled[0, :])) - {0}
     if not edge_labels:
         return np.zeros_like(mask, dtype=bool)
-    return np.isin(labeled, list(edge_labels)).astype(bool)
+    return np.isin(labeled, list(edge_labels))
 
+
+def _assemble_full_mask(upper: np.ndarray, lower_flipped: np.ndarray, middle_height: int = 0) -> np.ndarray:
+    """Stack the upper half, ``middle_height`` empty rows and the lower half flipped back."""
+    upper = np.asarray(upper, dtype=bool)
+    lower = np.flipud(np.asarray(lower_flipped, dtype=bool))
+    full = np.zeros((upper.shape[0] + middle_height + lower.shape[0], upper.shape[1]), dtype=bool)
+    full[: upper.shape[0], :] = upper
+    full[upper.shape[0] + middle_height :, :] = lower
+    return full
+
+
+def _primary_debug_payload(
+    processed: np.ndarray,
+    upper_result: Dict[str, Any],
+    lower_result: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "processed": processed,
+        "upper": {key: upper_result[key] for key in _PRIMARY_DEBUG_KEYS},
+        "lower": {key: lower_result[key] for key in _PRIMARY_DEBUG_KEYS},
+    }
+
+
+class _EdgeFrame(NamedTuple):
+    """The two edge halves of one frame, as passed to :meth:`EdgeDetector._process_edge_slice`."""
+
+    idx: int
+    upper: np.ndarray
+    lower: np.ndarray  # not yet flipped
+    middle_height: int  # rows between the halves (region-override mode only)
+    raw_frame: Callable[[Tuple[int, int]], np.ndarray]  # display frame for a mask of the given shape
 
 
 class EdgeDetector:
-    """Edge-focused delamination workflows.
+    """Edge delamination detection.
 
-    The class exposes:
-
-    - :meth:`detect_primary` for single-interface edge tracking.
-    - :meth:`detect_edge_multi` for hierarchical multi-interface delamination.
+    :meth:`detect_primary` detects one interface; :meth:`detect_edge_multi`
+    splits the damage between several interfaces.
     """
 
     def __init__(self, owner: DelaminationDetector) -> None:
-        """Create an edge detector bound to its parent delamination detector."""
+        """Create an edge detector for the parent :class:`DelaminationDetector`."""
         self.owner = owner
 
     def detect_primary(
@@ -172,42 +187,43 @@ class EdgeDetector:
         save_debug_outputs: bool = False,
         debug_dirname: str = "edge_accumulation_debug",
     ) -> Dict[str, Any]:
-        """Detect primary edge delamination masks.
+        """Detect edge delamination in every frame.
 
-        The frame is split into upper/lower halves. The lower half is flipped so both
-        sides are treated with the same edge-seeding convention. Masks are latched over
-        time and then assembled back into full-frame outputs.
+        Each frame is split into an upper and a lower half, and the lower
+        half is flipped so that both grow from row 0. Damage must connect to
+        the specimen edge, and masks are latched over time.
 
         Parameters
         ----------
         processed_cache_paths, processed_stack:
-            Optional preprocessed source.  If omitted, preprocessing is performed
-            automatically with ``reference_mode="static"``.  When providing
-            pre-computed frames, they must have been produced with static reference;
-            rolling-median preprocessed frames are only appropriate for
-            :meth:`detect_edge_multi`.
+            Preprocessed frames, as cache files or arrays. If neither is
+            given, the full stack is preprocessed with
+            ``reference_mode="static"``. Frames you pass should also use a
+            static reference.
         save_overlays:
-            If ``True``, save per-frame edge overlays.
+            Save an edge overlay per frame.
         overlay_dirname:
-            Output folder root under specimen results.
+            Output folder under the specimen results.
         overlay_view:
-            One of ``"mask"``, ``"line"``, or ``"both"``.
+            ``"mask"``, ``"line"`` or ``"both"``.
         max_frames:
-            Optional cap on processed frames.
+            Process only the first ``max_frames`` frames.
         params:
-            Optional edge parameter overrides.
+            Edge parameter overrides.
         debug:
-            If ``True``, return per-frame intermediate arrays and thresholds.
+            Return intermediate images and thresholds per frame.
+        progress:
+            Print progress.
         save_debug_outputs:
-            If ``True``, persist intermediate edge arrays per frame to disk.
+            Save every intermediate image to disk.
         debug_dirname:
-            Output folder name for saved debug images.
+            Folder for those images.
 
         Returns
         -------
         dict[str, Any]
-            ``{"masks": dict[str, np.ndarray], "debug": dict[str, Any] | None}``
-            keyed by ``frame_XXXX``.
+            ``{"masks": {frame_key: mask}, "debug": {...} or None}``, with
+            keys like ``"frame_0003"``.
         """
         if processed_cache_paths and processed_stack:
             raise ValueError("Provide either processed_cache_paths or processed_stack, not both.")
@@ -215,279 +231,207 @@ class EdgeDetector:
             raise ValueError("overlay_view must be one of: 'mask', 'line', 'both'.")
 
         if self.owner._uses_stack_overrides():
-            return self._detect_primary_region_overrides(
-                processed_cache_paths=processed_cache_paths,
-                save_overlays=save_overlays,
-                overlay_dirname=overlay_dirname,
-                overlay_view=overlay_view,
-                max_frames=max_frames,
-                params=params,
-                debug=debug,
-                progress=progress,
-                save_debug_outputs=save_debug_outputs,
-                debug_dirname=debug_dirname,
-            )
-
-        stacks = self.owner._select_stacks()
-        raw_stack = getattr(self.owner.specimen, "image_stack_full", None) or stacks.get("full")
-        if save_overlays and raw_stack is None:
-            raise ValueError("Cannot save overlays without a full raw image stack.")
-        if processed_cache_paths is None and processed_stack is None:
-            processed_cache_paths = _auto_preprocess_cache_paths(
-                self.owner,
-                save_overlays=save_overlays,
-                max_frames=max_frames,
-                progress=progress,
-                key_prefix="edge_primary_auto",
-            )
-
-        primary_masks: Dict[str, np.ndarray] = {}
-        debug_payloads: Optional[Dict[str, Any]] = {} if debug else None
-
-        upper_state: Optional[np.ndarray] = None
-        lower_state: Optional[np.ndarray] = None
-
-        edge_params = self._resolve_primary_params(params)
-
-        debug_root: Optional[Path] = None
-        if save_debug_outputs:
-            debug_root = self.owner.specimen.results_dir(debug_dirname)
-            debug_root.mkdir(parents=True, exist_ok=True)
-
-        if processed_stack is not None:
-            processed_iter = enumerate(processed_stack)
-            total_frames = len(processed_stack)
+            edge_params = self._resolve_primary_params(params)
+            frames, total_frames = self._region_override_frames(processed_cache_paths, max_frames, params, progress)
         else:
-            if processed_cache_paths is None:
-                raise ValueError("No processed frames available for edge detection.")
-            processed_iter = self.owner.iter_preprocessed_cache(processed_cache_paths)
-            total_frames = len(processed_cache_paths)
+            raw_stack = getattr(self.owner.specimen, "image_stack_full", None)
+            if save_overlays and raw_stack is None:
+                raise ValueError("Cannot save overlays without a full raw image stack.")
+            if processed_cache_paths is None and processed_stack is None:
+                processed_cache_paths = _auto_preprocess_cache_paths(
+                    self.owner,
+                    save_overlays=save_overlays,
+                    max_frames=max_frames,
+                    progress=progress,
+                    key_prefix="edge_primary_auto",
+                )
+            edge_params = self._resolve_primary_params(params)
 
-        if max_frames is not None:
-            total_frames = min(total_frames, max_frames)
-        progress_state = _progress_init("edge_primary", total_frames, progress)
+            if processed_stack is not None:
+                processed_iter: Iterable[Tuple[int, np.ndarray]] = enumerate(processed_stack)
+                total_frames = len(processed_stack)
+            else:
+                processed_iter = self.owner.iter_preprocessed_cache(processed_cache_paths)
+                total_frames = len(processed_cache_paths)
+            if max_frames is not None:
+                total_frames = min(total_frames, max_frames)
+            frames = self._full_frame_halves(processed_iter, total_frames, raw_stack)
+
+        return self._accumulate_primary(
+            frames,
+            total_frames,
+            edge_params=edge_params,
+            save_overlays=save_overlays,
+            overlay_dirname=overlay_dirname,
+            overlay_view=overlay_view,
+            debug=debug,
+            progress=progress,
+            debug_root=self.owner.specimen.results_dir(debug_dirname) if save_debug_outputs else None,
+        )
+
+    @staticmethod
+    def _full_frame_halves(
+        processed_iter: Iterable[Tuple[int, np.ndarray]],
+        total_frames: int,
+        raw_stack: Optional[Sequence[np.ndarray]],
+    ) -> Iterator[_EdgeFrame]:
+        def raw_frame(idx: int, processed: np.ndarray, _shape: Tuple[int, int]) -> np.ndarray:
+            return _ensure_uint8(raw_stack[idx]) if raw_stack is not None else processed
 
         for idx, processed in processed_iter:
             if idx >= total_frames:
                 break
             split_row = processed.shape[0] // 2
-            upper_slice = processed[:split_row, :]
-            lower_slice = processed[split_row:, :]
-            lower_prepared = np.flipud(lower_slice)
-
-            upper_result = self._process_edge_slice(
-                upper_slice,
-                prev_latched=upper_state,
-                params=edge_params,
-                avg_crack_width_px=self.owner.specimen.avg_crack_width_px,
-            )
-            lower_result = self._process_edge_slice(
-                lower_prepared,
-                prev_latched=lower_state,
-                params=edge_params,
-                avg_crack_width_px=self.owner.specimen.avg_crack_width_px,
+            yield _EdgeFrame(
+                idx,
+                processed[:split_row, :],
+                processed[split_row:, :],
+                0,
+                partial(raw_frame, idx, processed),
             )
 
-            upper_state = upper_result["primary_latched"]
-            lower_state = lower_result["primary_latched"]
-
-            primary_full = np.zeros_like(processed, dtype=bool)
-            primary_full[:split_row, :] = upper_state
-            lower_unflipped = np.flipud(lower_state) if lower_state is not None else np.zeros_like(lower_slice)
-            primary_full[split_row:, :] = lower_unflipped
-
-            frame_key = f"frame_{idx:04d}"
-            primary_masks[frame_key] = primary_full
-
-            if save_overlays and raw_stack is not None:
-                raw_frame = _ensure_uint8(raw_stack[idx])
-                overlay_dir = self.owner.specimen.results_dir(overlay_dirname, "edge", "overlays")
-                overlay_path = overlay_dir / f"edge_overlay_{idx:04d}.png"
-                _save_edge_overlay(raw_frame, primary_full, overlay_path, view=overlay_view)
-
-            if debug_root is not None:
-                raw_frame = _ensure_uint8(raw_stack[idx]) if raw_stack is not None else processed
-                frame_dir = debug_root / f"frame_{idx:04d}"
-                frame_dir.mkdir(parents=True, exist_ok=True)
-                _save_edge_debug_frame(
-                    frame_dir=frame_dir,
-                    raw_frame=raw_frame,
-                    processed=processed,
-                    upper_slice=upper_slice,
-                    lower_slice=lower_prepared,
-                    upper_result=upper_result,
-                    lower_result=lower_result,
-                    lower_latched_unflipped=np.flipud(lower_state) if lower_state is not None else None,
-                    full_latched=primary_full,
-                )
-
-            if debug and debug_payloads is not None:
-                debug_payloads[frame_key] = _build_primary_debug_payload(
-                    processed.copy(), upper_result, lower_result
-                )
-
-            _progress_update("edge_primary", idx + 1, total_frames, progress_state)
-
-        _progress_done("edge_primary", total_frames, progress)
-
-        return {"masks": primary_masks, "debug": debug_payloads}
-
-    def _detect_primary_region_overrides(
+    def _region_override_frames(
         self,
-        *,
-        processed_cache_paths: Optional[List[Path]] = None,
-        save_overlays: bool = False,
-        overlay_dirname: str = "delamination",
-        overlay_view: str = "mask",
-        max_frames: Optional[int] = None,
-        params: Optional[Dict[str, Any]] = None,
-        debug: bool = False,
-        progress: bool = False,
-        save_debug_outputs: bool = False,
-        debug_dirname: str = "edge_accumulation_debug",
-    ) -> Tuple[Dict[str, np.ndarray], Optional[Dict[str, Any]]]:
-        """Edge detection path that prioritizes explicit upper/lower/middle stacks."""
+        processed_cache_paths: Optional[List[Path]],
+        max_frames: Optional[int],
+        params: Optional[Dict[str, Any]],
+        progress: bool,
+    ) -> Tuple[Iterator[_EdgeFrame], int]:
+        """Preprocess the upper and lower region stacks; return their frames and the frame count."""
         upper_stack, middle_stack, lower_stack, raw_stack, total_frames = _fetch_region_override_stacks(
             self.owner, domain="edge", max_frames=max_frames
         )
 
-        edge_params = self._resolve_primary_params(params)
-        reference_defaults = _reference_settings_from_cache_paths(processed_cache_paths)
-        reference_mode = str((params or {}).get("reference_mode", reference_defaults["reference_mode"]))
-        reference_window = int((params or {}).get("reference_window", reference_defaults["reference_window"]))
-        reference_skip = int((params or {}).get("reference_skip", reference_defaults["reference_skip"]))
+        reference = _reference_settings_from_cache_paths(processed_cache_paths)
+        reference.update({key: (params or {})[key] for key in reference if key in (params or {})})
+        token = _result_key_token(self.owner.interface.name)
+        upper_cache_paths, lower_cache_paths = (
+            self.owner.preprocess_stack_to_disk(
+                stack,
+                key=f"edge_{side}_auto_{token}",
+                max_frames=total_frames,
+                cache_dirname="Preprocessor_cache",
+                history_mode="running",
+                history_window_size=None,
+                reference_mode=str(reference["reference_mode"]),
+                reference_window=int(reference["reference_window"]),
+                reference_skip=int(reference["reference_skip"]),
+                progress=progress,
+            )["cache_paths"]
+            for side, stack in (("upper", upper_stack), ("lower", lower_stack))
+        )
 
-        upper_cache_paths = self.owner.preprocess_stack_to_disk(
-            upper_stack,
-            key=f"edge_upper_auto_{_result_key_token(self.owner.interface.name)}",
-            max_frames=total_frames,
-            cache_dirname="Preprocessor_cache",
-            history_mode="running",
-            history_window_size=None,
-            reference_mode=reference_mode,
-            reference_window=reference_window,
-            reference_skip=reference_skip,
-            progress=progress,
-        )["cache_paths"]
-        lower_cache_paths = self.owner.preprocess_stack_to_disk(
-            lower_stack,
-            key=f"edge_lower_auto_{_result_key_token(self.owner.interface.name)}",
-            max_frames=total_frames,
-            cache_dirname="Preprocessor_cache",
-            history_mode="running",
-            history_window_size=None,
-            reference_mode=reference_mode,
-            reference_window=reference_window,
-            reference_skip=reference_skip,
-            progress=progress,
-        )["cache_paths"]
+        def raw_frame(idx: int, middle_raw: np.ndarray, shape: Tuple[int, int]) -> np.ndarray:
+            return _region_override_raw_frame(raw_stack, idx, shape, upper_stack[idx], middle_raw, lower_stack[idx])
 
+        def frames() -> Iterator[_EdgeFrame]:
+            upper_iter = self.owner.iter_preprocessed_cache(upper_cache_paths)
+            lower_iter = self.owner.iter_preprocessed_cache(lower_cache_paths)
+            for (idx, upper_processed), (_, lower_processed) in zip(upper_iter, lower_iter):
+                if idx >= total_frames:
+                    break
+                middle_raw = _ensure_uint8(middle_stack[idx])
+                yield _EdgeFrame(
+                    idx,
+                    _ensure_uint8(upper_processed),
+                    _ensure_uint8(lower_processed),
+                    int(middle_raw.shape[0]),
+                    partial(raw_frame, idx, middle_raw),
+                )
+
+        return frames(), total_frames
+
+    def _accumulate_primary(
+        self,
+        frames: Iterable[_EdgeFrame],
+        total_frames: int,
+        *,
+        edge_params: Dict[str, Any],
+        save_overlays: bool,
+        overlay_dirname: str,
+        overlay_view: str,
+        debug: bool,
+        progress: bool,
+        debug_root: Optional[Path],
+    ) -> Dict[str, Any]:
+        """Detect edge damage in both halves of every frame and latch the masks."""
+        overlay_dir = self.owner.specimen.results_dir(overlay_dirname, "edge", "overlays") if save_overlays else None
         primary_masks: Dict[str, np.ndarray] = {}
         debug_payloads: Optional[Dict[str, Any]] = {} if debug else None
-
         upper_state: Optional[np.ndarray] = None
         lower_state: Optional[np.ndarray] = None
+        progress_log = _Progress("edge_primary", total_frames, progress)
 
-        debug_root: Optional[Path] = None
-        if save_debug_outputs:
-            debug_root = self.owner.specimen.results_dir(debug_dirname)
-            debug_root.mkdir(parents=True, exist_ok=True)
-
-        progress_state = _progress_init("edge_primary", total_frames, progress)
-
-        upper_iter = self.owner.iter_preprocessed_cache(upper_cache_paths)
-        lower_iter = self.owner.iter_preprocessed_cache(lower_cache_paths)
-
-        for (idx_u, upper_processed), (idx_l, lower_processed) in zip(upper_iter, lower_iter):
-            idx = int(min(idx_u, idx_l))
-            if idx >= total_frames:
-                break
-
-            upper_processed = _ensure_uint8(upper_processed)
-            lower_processed = _ensure_uint8(lower_processed)
-            lower_prepared = np.flipud(lower_processed)
-
-            upper_result = self._process_edge_slice(
-                upper_processed,
-                prev_latched=upper_state,
-                params=edge_params,
-                avg_crack_width_px=self.owner.specimen.avg_crack_width_px,
+        for frame in frames:
+            idx = frame.idx
+            lower_flipped = np.flipud(frame.lower)
+            upper_result, lower_result = self._process_halves(
+                frame.upper, lower_flipped, upper_state, lower_state, edge_params
             )
-            lower_result = self._process_edge_slice(
-                lower_prepared,
-                prev_latched=lower_state,
-                params=edge_params,
-                avg_crack_width_px=self.owner.specimen.avg_crack_width_px,
-            )
-
             upper_state = upper_result["primary_latched"]
             lower_state = lower_result["primary_latched"]
 
-            middle_raw = _ensure_uint8(middle_stack[idx])
-            upper_h, width = upper_processed.shape[:2]
-            middle_h = int(middle_raw.shape[0])
-            lower_h = int(lower_processed.shape[0])
-
-            primary_full = np.zeros((upper_h + middle_h + lower_h, width), dtype=bool)
-            primary_full[:upper_h, :] = np.asarray(upper_state, dtype=bool)
-            lower_unflipped = np.flipud(np.asarray(lower_state, dtype=bool))
-            primary_full[upper_h + middle_h :, :] = lower_unflipped
-
+            primary_full = _assemble_full_mask(upper_state, lower_state, frame.middle_height)
             frame_key = f"frame_{idx:04d}"
             primary_masks[frame_key] = primary_full
 
-            if save_overlays:
-                raw_frame = _region_override_raw_frame(
-                    raw_stack, idx, primary_full.shape[:2], upper_stack[idx], middle_raw, lower_stack[idx]
+            if overlay_dir is None and debug_root is None and not debug:
+                progress_log.update(idx + 1)
+                continue
+
+            processed_full = None
+            if debug_root is not None or debug_payloads is not None:
+                middle_gap = np.zeros((frame.middle_height, frame.upper.shape[1]), dtype=frame.upper.dtype)
+                processed_full = np.vstack([frame.upper, middle_gap, frame.lower])
+
+            if overlay_dir is not None:
+                _save_edge_overlay(
+                    frame.raw_frame(primary_full.shape[:2]),
+                    primary_full,
+                    overlay_dir / f"edge_overlay_{idx:04d}.png",
+                    view=overlay_view,
                 )
-                overlay_dir = self.owner.specimen.results_dir(overlay_dirname, "edge", "overlays")
-                overlay_path = overlay_dir / f"edge_overlay_{idx:04d}.png"
-                _save_edge_overlay(raw_frame, primary_full, overlay_path, view=overlay_view)
 
             if debug_root is not None:
-                raw_frame = _region_override_raw_frame(
-                    raw_stack, idx, primary_full.shape[:2], upper_stack[idx], middle_raw, lower_stack[idx]
-                )
-
-                processed_full = np.vstack(
-                    [
-                        upper_processed,
-                        np.zeros((middle_h, width), dtype=np.uint8),
-                        lower_processed,
-                    ]
-                )
-
                 frame_dir = debug_root / f"frame_{idx:04d}"
                 frame_dir.mkdir(parents=True, exist_ok=True)
                 _save_edge_debug_frame(
                     frame_dir=frame_dir,
-                    raw_frame=raw_frame,
+                    raw_frame=frame.raw_frame(primary_full.shape[:2]),
                     processed=processed_full,
-                    upper_slice=upper_processed,
-                    lower_slice=lower_prepared,
+                    upper_slice=frame.upper,
+                    lower_slice=lower_flipped,
                     upper_result=upper_result,
                     lower_result=lower_result,
-                    lower_latched_unflipped=lower_unflipped,
+                    lower_latched_unflipped=np.flipud(lower_state),
                     full_latched=primary_full,
                 )
 
-            if debug and debug_payloads is not None:
-                debug_payloads[frame_key] = _build_primary_debug_payload(
-                    np.vstack(
-                        [
-                            upper_processed,
-                            np.zeros((middle_h, width), dtype=np.uint8),
-                            lower_processed,
-                        ]
-                    ),
-                    upper_result,
-                    lower_result,
-                )
+            if debug_payloads is not None:
+                debug_payloads[frame_key] = _primary_debug_payload(processed_full, upper_result, lower_result)
 
-            _progress_update("edge_primary", idx + 1, total_frames, progress_state)
+            progress_log.update(idx + 1)
 
-        _progress_done("edge_primary", total_frames, progress)
+        progress_log.done()
         return {"masks": primary_masks, "debug": debug_payloads}
+
+    def _process_halves(
+        self,
+        upper: np.ndarray,
+        lower_flipped: np.ndarray,
+        upper_prev: Optional[np.ndarray],
+        lower_prev: Optional[np.ndarray],
+        params: Dict[str, Any],
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Run :meth:`_process_edge_slice` on the upper half, then on the flipped lower half."""
+        avg_crack_width_px = self.owner.specimen.avg_crack_width_px
+        upper_result = self._process_edge_slice(
+            upper, prev_latched=upper_prev, params=params, avg_crack_width_px=avg_crack_width_px
+        )
+        lower_result = self._process_edge_slice(
+            lower_flipped, prev_latched=lower_prev, params=params, avg_crack_width_px=avg_crack_width_px
+        )
+        return upper_result, lower_result
 
     def detect_edge_multi(
         self,
@@ -509,154 +453,125 @@ class EdgeDetector:
         debug: bool = False,
         debug_dir: Optional[Path] = None,
     ) -> Dict[str, Any]:
-        """Detect hierarchical edge delamination across multiple interfaces.
+        """Split edge delamination between several interfaces.
 
-        The first level uses primary edge detection. Each deeper level is attributed from
-        its parent level using workbook-inspired candidate logic, similarity gating,
-        persistence confirmation, and edge-connected reconstruction.
+        The first interface is detected as in :meth:`detect_primary`. Each
+        deeper interface gets the new damage that appears inside the mask of
+        the interface above it, as that mask was ``reference_window`` frames
+        earlier (default 7). Only damage connected to the specimen edge
+        counts.
 
         Parameters
         ----------
         interfaces:
-            Ordered interface list from shallow to deep.
+            Interfaces from the shallowest to the deepest.
         processed_cache_paths, processed_stack:
-            Preprocessed source for the **primary** (level-0) edge detection.  If omitted,
-            rolling-median preprocessing is executed automatically.  For best results pass
-            a *static*-preprocessed cache so the accumulated primary mask matches
-            ``detect_both_delaminations``.
+            Preprocessed frames for the first interface. If neither is given,
+            the full stack is preprocessed with a rolling median reference.
+            A static-reference cache gives a first-interface mask that
+            matches :meth:`DelaminationDetector.detect_both_delaminations`.
         secondary_cache_paths:
-            Optional separate cache for the **secondary** binary/mask step.  When provided,
-            rolling-median-preprocessed frames from this cache are used to compute the
-            binary and mask used for hierarchical attribution, while
-            ``processed_cache_paths`` drives the primary latched accumulation only.
-            Both caches must have the same frame count.
+            Optional rolling-median cache with the same frames. If given,
+            damage for the deeper interfaces is detected on it; otherwise on
+            the primary frames.
         save_overlays:
-            If ``True``, save one classified overlay per frame with an external legend.
+            Save one overlay per frame with a color per interface.
         overlay_dirname:
-            Output folder root under specimen results.
+            Output folder under the specimen results.
         save_masks:
-            If ``True``, save inclusive/exclusive masks for each interface as ``.npz``.
+            Save the masks of each interface to ``.npz`` and record them on
+            the interface.
         masks_dirname:
-            Mask bundle subfolder name.
+            Folder for the mask files.
         max_frames:
-            Optional cap on processed frames.
+            Process only the first ``max_frames`` frames.
         primary_params:
-            Edge detection parameters for the primary (level-0) pass: window_edge,
-            gaussian_filters, hard_floor, closing_px, seed_ratio, etc.
+            Edge parameters for the first interface (``window_edge``,
+            ``hard_floor``, ``seed_ratio``, ...).
         secondary_edge_params:
-            Edge detection parameters applied to ``secondary_cache_paths`` frames when
-            computing binary/mask for the attribution logic.  Ignored if
-            ``secondary_cache_paths`` is not set.
+            Edge parameters for the ``secondary_cache_paths`` frames.
         secondary_params:
-            Attribution parameters for deeper levels: secondary_similarity_threshold.
+            ``secondary_start_frame``: no damage is given to deeper interfaces
+            before this frame. ``secondary_similarity_threshold`` and
+            ``min_primary_frac_for_secondary`` are accepted but not used yet.
         params:
-            Legacy single-dict interface (backward compat). Keys are merged into
-            primary_params as a base; primary_params and secondary_params take precedence.
+            Older single-dict form; used as the base of the other parameter
+            dicts.
         return_masks:
-            If ``True``, include mask dictionaries in the returned payload.
+            Include the masks in the result.
         debug:
-            If ``True``, include per-level diagnostics.
+            Include per-interface diagnostics in the result.
+        debug_dir:
+            Save a debug figure per frame and deeper interface here.
 
         Returns
         -------
         dict[str, Any]
-            Contains interface descriptors, frame-level maps, output paths,
-            effective parameters, and optional masks/debug payloads.
+            ``interfaces`` (key, name, label and color of each),
+            ``frame_indices``, ``frame_level_maps`` (deepest interface per
+            pixel), ``paths`` and ``params``, plus ``inclusive_masks``,
+            ``exclusive_masks`` and ``debug`` when requested.
         """
         if processed_cache_paths and processed_stack:
             raise ValueError("Provide either processed_cache_paths or processed_stack, not both.")
 
+        primary_params = {**(params or {}), **(primary_params or {})}
         if processed_cache_paths is None and processed_stack is None:
-            stacks_for_preprocess = self.owner._select_stacks()
-            auto_stack = (
-                getattr(self.owner.specimen, "image_stack_full", None)
-                or stacks_for_preprocess.get("full")
-            )
+            auto_stack = getattr(self.owner.specimen, "image_stack_full", None)
             if auto_stack is None:
                 raise ValueError(
                     "detect_edge_multi: no full image stack available for automatic "
                     "preprocessing. Provide processed_cache_paths or processed_stack."
                 )
-            _p = dict(params or {})
-            _p.update(primary_params or {})
-            _ref_window = int(_p.get("reference_window", 10))
-            _ref_skip = int(_p.get("reference_skip", 1))
             interface_token = _result_key_token(interfaces[0].name if interfaces else "i0")
-            auto_key = f"edge_multi_auto_{interface_token}"
             processed_cache_paths = self.owner.preprocess_stack_to_disk(
                 auto_stack,
-                key=auto_key,
+                key=f"edge_multi_auto_{interface_token}",
                 max_frames=max_frames,
                 cache_dirname="Preprocessor_cache",
                 reference_mode="rolling_median",
-                reference_window=_ref_window,
-                reference_skip=_ref_skip,
+                reference_window=int(primary_params.get("reference_window", 10)),
+                reference_skip=int(primary_params.get("reference_skip", 1)),
             )["cache_paths"]
 
         interface_list = list(interfaces)
         if not interface_list:
             raise ValueError("detect_edge_multi requires at least one interface.")
 
-        # Load baselines from cache .npz files for debug panels.
-        _debug_baselines: List[np.ndarray] = []
-        if debug_dir is not None and processed_cache_paths:
-            for p in processed_cache_paths:
-                try:
-                    with np.load(p, allow_pickle=False) as z:
-                        _debug_baselines.append(z["baseline"])
-                except Exception:
-                    _debug_baselines.append(np.array([]))
-
-        stacks = self.owner._select_stacks()
-        raw_stack = getattr(self.owner.specimen, "image_stack_full", None) or stacks.get("full")
+        raw_stack = getattr(self.owner.specimen, "image_stack_full", None)
         if save_overlays and raw_stack is None:
             raise ValueError("Cannot save overlays without a full raw image stack.")
 
-        _primary = dict(params or {})
-        _primary.update(primary_params or {})
-        _secondary = dict(params or {})
-        _secondary.update(secondary_params or {})
-        edge_params = self._resolve_primary_params(_primary)
-        multi_params = self._resolve_multi_params(_secondary)
-
-        # Resolve edge params for the secondary binary/mask step (rolling_median cache).
-        _sec_edge_params = self._resolve_primary_params(
-            {**(params or {}), **(secondary_edge_params or {})}
-        ) if secondary_cache_paths is not None else None
-
-        if processed_stack is not None:
-            processed_iter = enumerate(processed_stack)
-        else:
-            processed_iter = self.owner.iter_preprocessed_cache(processed_cache_paths)
-
-        _secondary_cache_iter = (
-            self.owner.iter_preprocessed_cache(secondary_cache_paths)
+        edge_params = self._resolve_primary_params(primary_params)
+        multi_params = self._resolve_multi_params({**(params or {}), **(secondary_params or {})})
+        # The secondary (rolling-median) cache, when given, supplies the
+        # candidate masks for the deeper levels; otherwise the primary pass does.
+        secondary_edge_params_resolved = (
+            self._resolve_primary_params({**(params or {}), **(secondary_edge_params or {})})
             if secondary_cache_paths is not None
             else None
         )
 
-        upper_state: Optional[np.ndarray] = None
-        lower_state: Optional[np.ndarray] = None
-        upper_rolling_state: Optional[np.ndarray] = None
-        lower_rolling_state: Optional[np.ndarray] = None
-        upper_rolling_frames: List[np.ndarray] = []
-        lower_rolling_frames: List[np.ndarray] = []
+        if processed_stack is not None:
+            processed_iter: Iterable[Tuple[int, np.ndarray]] = enumerate(processed_stack)
+        else:
+            processed_iter = self.owner.iter_preprocessed_cache(processed_cache_paths)
+        secondary_iter = (
+            self.owner.iter_preprocessed_cache(secondary_cache_paths) if secondary_cache_paths is not None else None
+        )
+        keep_debug = debug_dir is not None
 
         frame_indices: List[int] = []
-        frame_shapes: List[Tuple[int, int]] = []
         split_rows: List[int] = []
-        upper_primary_frames: List[np.ndarray] = []
-        lower_primary_frames: List[np.ndarray] = []
-        _debug_upper_results: List[Dict[str, Any]] = []
-        _debug_lower_results: List[Dict[str, Any]] = []
-        _debug_processed: List[np.ndarray] = []
-        _debug_sec_upper_results: List[Dict[str, Any]] = []
-        _debug_sec_lower_results: List[Dict[str, Any]] = []
-        _debug_sec_processed: List[np.ndarray] = []
-        upper_binary_frames: List[np.ndarray] = []
-        lower_binary_frames: List[np.ndarray] = []
-        upper_mask_frames: List[np.ndarray] = []
-        lower_mask_frames: List[np.ndarray] = []
+        primary_state: Dict[str, Optional[np.ndarray]] = {side: None for side in _SIDES}
+        secondary_state: Dict[str, Optional[np.ndarray]] = {side: None for side in _SIDES}
+        primary_frames: Dict[str, List[np.ndarray]] = {side: [] for side in _SIDES}
+        rolling_frames: Dict[str, List[np.ndarray]] = {side: [] for side in _SIDES}
+        candidate_frames: Dict[str, List[np.ndarray]] = {side: [] for side in _SIDES}
+        debug_processed: List[np.ndarray] = []
+        debug_results: Dict[str, List[Dict[str, Any]]] = {side: [] for side in _SIDES}
+        debug_sec_processed: List[np.ndarray] = []
+        debug_sec_results: Dict[str, List[Dict[str, Any]]] = {side: [] for side in _SIDES}
 
         for idx, processed in processed_iter:
             if max_frames is not None and len(frame_indices) >= max(0, int(max_frames)):
@@ -664,177 +579,91 @@ class EdgeDetector:
 
             processed_uint8 = _ensure_uint8(processed)
             split_row = processed_uint8.shape[0] // 2
-            upper_slice = processed_uint8[:split_row, :]
-            lower_slice = processed_uint8[split_row:, :]
-            lower_prepared = np.flipud(lower_slice)
-
-            upper_result = self._process_edge_slice(
-                upper_slice,
-                prev_latched=upper_state,
-                params=edge_params,
-                avg_crack_width_px=self.owner.specimen.avg_crack_width_px,
-            )
-            lower_result = self._process_edge_slice(
-                lower_prepared,
-                prev_latched=lower_state,
-                params=edge_params,
-                avg_crack_width_px=self.owner.specimen.avg_crack_width_px,
-            )
-
-            upper_curr = np.asarray(upper_result["primary_latched"], dtype=bool)
-            lower_curr = np.asarray(lower_result["primary_latched"], dtype=bool)
-            upper_state = upper_curr
-            lower_state = lower_curr
-
-            if debug_dir is not None:
-                _debug_upper_results.append(upper_result)
-                _debug_lower_results.append(lower_result)
-                _debug_processed.append(processed_uint8.copy())
+            results = dict(zip(_SIDES, self._process_halves(
+                processed_uint8[:split_row, :],
+                np.flipud(processed_uint8[split_row:, :]),
+                primary_state["upper"],
+                primary_state["lower"],
+                edge_params,
+            )))
+            for side in _SIDES:
+                primary_state[side] = np.asarray(results[side]["primary_latched"], dtype=bool)
+                primary_frames[side].append(primary_state[side].copy())
 
             frame_indices.append(int(idx))
-            frame_shapes.append((int(processed_uint8.shape[0]), int(processed_uint8.shape[1])))
             split_rows.append(split_row)
-            upper_primary_frames.append(upper_curr.copy())
-            lower_primary_frames.append(lower_curr.copy())
+            if keep_debug:
+                debug_processed.append(processed_uint8.copy())
+                for side in _SIDES:
+                    debug_results[side].append(results[side])
 
-            if _secondary_cache_iter is not None:
-                _, sec_processed = next(_secondary_cache_iter)
+            if secondary_iter is not None:
+                _, sec_processed = next(secondary_iter)
                 sec_uint8 = _ensure_uint8(sec_processed)
-                sec_upper = self._process_edge_slice(
+                candidate_results = dict(zip(_SIDES, self._process_halves(
                     sec_uint8[:split_row, :],
-                    prev_latched=upper_rolling_state,
-                    params=_sec_edge_params,
-                    avg_crack_width_px=self.owner.specimen.avg_crack_width_px,
-                )
-                sec_lower = self._process_edge_slice(
                     np.flipud(sec_uint8[split_row:, :]),
-                    prev_latched=lower_rolling_state,
-                    params=_sec_edge_params,
-                    avg_crack_width_px=self.owner.specimen.avg_crack_width_px,
-                )
-                upper_rolling_state = np.asarray(sec_upper["primary_latched"], dtype=bool)
-                lower_rolling_state = np.asarray(sec_lower["primary_latched"], dtype=bool)
-                upper_rolling_frames.append(upper_rolling_state.copy())
-                lower_rolling_frames.append(lower_rolling_state.copy())
-                if debug_dir is not None:
-                    _debug_sec_upper_results.append(sec_upper)
-                    _debug_sec_lower_results.append(sec_lower)
-                    _debug_sec_processed.append(sec_uint8.copy())
-                upper_binary_frames.append(np.asarray(sec_upper["binary"], dtype=bool))
-                lower_binary_frames.append(np.asarray(sec_lower["binary"], dtype=bool))
-                upper_mask_frames.append(np.asarray(sec_upper["mask"], dtype=bool))
-                lower_mask_frames.append(np.asarray(sec_lower["mask"], dtype=bool))
+                    secondary_state["upper"],
+                    secondary_state["lower"],
+                    secondary_edge_params_resolved,
+                )))
+                for side in _SIDES:
+                    secondary_state[side] = np.asarray(candidate_results[side]["primary_latched"], dtype=bool)
+                    rolling_frames[side].append(secondary_state[side].copy())
+                if keep_debug:
+                    debug_sec_processed.append(sec_uint8.copy())
+                    for side in _SIDES:
+                        debug_sec_results[side].append(candidate_results[side])
             else:
-                upper_rolling_frames.append(upper_curr.copy())
-                lower_rolling_frames.append(lower_curr.copy())
-                upper_binary_frames.append(np.asarray(upper_result["binary"], dtype=bool))
-                lower_binary_frames.append(np.asarray(lower_result["binary"], dtype=bool))
-                upper_mask_frames.append(np.asarray(upper_result["mask"], dtype=bool))
-                lower_mask_frames.append(np.asarray(lower_result["mask"], dtype=bool))
+                candidate_results = results
+                for side in _SIDES:
+                    rolling_frames[side].append(primary_state[side].copy())
+            for side in _SIDES:
+                candidate_frames[side].append(np.asarray(candidate_results[side]["mask"], dtype=bool))
 
         if not frame_indices:
             raise ValueError("No processed frames available for multi-interface edge detection.")
 
-        upper_levels: List[List[np.ndarray]] = [upper_primary_frames]
-        lower_levels: List[List[np.ndarray]] = [lower_primary_frames]
-        upper_rolling_levels: List[List[np.ndarray]] = [upper_rolling_frames]
-        lower_rolling_levels: List[List[np.ndarray]] = [lower_rolling_frames]
+        levels: Dict[str, List[List[np.ndarray]]] = {side: [primary_frames[side]] for side in _SIDES}
         debug_levels: Dict[str, Any] = {}
-
-        # Per-frame gate: suppress secondary if static primary area is below threshold.
-        _min_prim_frac = multi_params["min_primary_frac_for_secondary"]
-        if _min_prim_frac > 0.0:
-            _upper_active: Optional[List[bool]] = []
-            _lower_active: Optional[List[bool]] = []
-            for _fp in range(len(upper_primary_frames)):
-                u = np.asarray(upper_primary_frames[_fp], dtype=bool)
-                l = np.asarray(lower_primary_frames[_fp], dtype=bool)
-                _upper_active.append(u.sum() / max(1, u.size) >= _min_prim_frac)
-                _lower_active.append(l.sum() / max(1, l.size) >= _min_prim_frac)
-        else:
-            _upper_active = None
-            _lower_active = None
+        parent_delay = int((secondary_edge_params_resolved or edge_params).get("reference_window", 7))
+        start_frame = multi_params["secondary_start_frame"]
 
         for level_idx in range(1, len(interface_list)):
-            upper_latched: List[np.ndarray] = []
-            lower_latched: List[np.ndarray] = []
-            upper_diag: List[Dict[str, Any]] = []
-            lower_diag: List[Dict[str, Any]] = []
-            acc_u = np.zeros_like(upper_mask_frames[0], dtype=bool)
-            acc_l = np.zeros_like(lower_mask_frames[0], dtype=bool)
-
-            # Use the established mask of the level directly above (delayed by ~rolling-
-            # median window) so the growing front is excluded: only ROLLING mask pixels
-            # inside the settled parent-level area accumulate here, catching the interior
-            # darkening event. For level 1 the parent is the primary (level 0); for level
-            # 2+ the parent is the previous level's own accumulated attribution, so each
-            # deeper level is recursively gated by the level immediately above it.
-            primary_upper = upper_levels[level_idx - 1]
-            primary_lower = lower_levels[level_idx - 1]
-            secondary_reference_params = _sec_edge_params or edge_params
-            sec_ref_window = int(secondary_reference_params.get("reference_window", 7))
-            _sec_start = multi_params.get("secondary_start_frame")
-
-            for frame_pos in range(len(upper_mask_frames)):
-                # Gate: suppress secondary accumulation before the configured onset frame.
-                if _sec_start is not None and frame_indices[frame_pos] < _sec_start:
-                    upper_latched.append(acc_u.copy())
-                    lower_latched.append(acc_l.copy())
-                    upper_diag.append({"_masks": {}, "connected_pixels": 0})
-                    lower_diag.append({"_masks": {}, "connected_pixels": 0})
-                    continue
-
-                mask_u = np.asarray(upper_mask_frames[frame_pos], dtype=bool)
-                mask_l = np.asarray(lower_mask_frames[frame_pos], dtype=bool)
-
-                delayed_pos = max(0, frame_pos - sec_ref_window)
-                est_u = np.asarray(primary_upper[delayed_pos], dtype=bool)
-                est_l = np.asarray(primary_lower[delayed_pos], dtype=bool)
-
-                conn_u = _filter_specimen_edge_connected(mask_u & est_u)
-                conn_l = _filter_specimen_edge_connected(mask_l & est_l)
-
-                acc_u = _filter_specimen_edge_connected(acc_u | conn_u)
-                acc_l = _filter_specimen_edge_connected(acc_l | conn_l)
-
-                upper_latched.append(acc_u.copy())
-                lower_latched.append(acc_l.copy())
-
-                _mu = {"connected_mask": conn_u} if debug_dir is not None else {}
-                upper_diag.append({"_masks": _mu, "connected_pixels": int(conn_u.sum())})
-                _ml = {"connected_mask": conn_l} if debug_dir is not None else {}
-                lower_diag.append({"_masks": _ml, "connected_pixels": int(conn_l.sum())})
-
-            upper_levels.append(upper_latched)
-            lower_levels.append(lower_latched)
-            upper_rolling_levels.append(upper_latched)
-            lower_rolling_levels.append(lower_latched)
+            latched: Dict[str, List[np.ndarray]] = {}
+            diagnostics: Dict[str, List[Dict[str, Any]]] = {}
+            for side in _SIDES:
+                latched[side], diagnostics[side] = self._attribute_deeper_level(
+                    candidate_frames[side],
+                    parent=levels[side][level_idx - 1],
+                    frame_indices=frame_indices,
+                    parent_delay=parent_delay,
+                    start_frame=start_frame,
+                    keep_masks=keep_debug,
+                )
+                levels[side].append(latched[side])
 
             if debug:
-                debug_levels[f"level_{level_idx + 1}"] = {
-                    "upper": upper_diag,
-                    "lower": lower_diag,
-                }
+                debug_levels[f"level_{level_idx + 1}"] = diagnostics
 
             if debug_dir is not None:
                 _save_edge_multi_debug_panels(
                     debug_dir=debug_dir,
                     frame_indices=frame_indices,
-                    processed_frames=_debug_processed,
-                    baselines=_debug_baselines,
-                    upper_results=_debug_upper_results,
-                    lower_results=_debug_lower_results,
-                    upper_latched=upper_latched,
-                    lower_latched=lower_latched,
-                    upper_diag=upper_diag,
-                    lower_diag=lower_diag,
+                    processed_frames=debug_processed,
+                    upper_results=debug_results["upper"],
+                    lower_results=debug_results["lower"],
+                    upper_latched=latched["upper"],
+                    lower_latched=latched["lower"],
+                    upper_diag=diagnostics["upper"],
+                    lower_diag=diagnostics["lower"],
                     split_rows=split_rows,
                     level_idx=level_idx,
-                    sec_processed_frames=_debug_sec_processed,
-                    sec_upper_results=_debug_sec_upper_results,
-                    sec_lower_results=_debug_sec_lower_results,
-                    upper_rolling_frames=upper_rolling_frames,
-                    lower_rolling_frames=lower_rolling_frames,
+                    sec_processed_frames=debug_sec_processed,
+                    sec_upper_results=debug_sec_results["upper"],
+                    sec_lower_results=debug_sec_results["lower"],
+                    upper_rolling_frames=rolling_frames["upper"],
+                    lower_rolling_frames=rolling_frames["lower"],
                 )
 
         result_keys = self._build_interface_result_keys(interface_list)
@@ -843,77 +672,52 @@ class EdgeDetector:
         exclusive_masks: Dict[str, Dict[str, np.ndarray]] = {key: {} for key in result_keys}
         frame_level_maps: Dict[str, np.ndarray] = {}
 
+        # Deeper levels overwrite shallower ones, so each pixel is labelled with the deepest level reaching it.
         for frame_pos, frame_idx in enumerate(frame_indices):
             frame_key = f"frame_{frame_idx:04d}"
-            shape = frame_shapes[frame_pos]
-            split_row = split_rows[frame_pos]
-
-            frame_level = np.zeros(shape, dtype=np.uint8)
-            for level_idx, key in enumerate(result_keys, start=1):
-                full_mask = self._assemble_full_mask(
-                    shape=shape,
-                    split_row=split_row,
-                    upper_mask=upper_levels[level_idx - 1][frame_pos],
-                    lower_mask_flipped=lower_levels[level_idx - 1][frame_pos],
+            frame_level: Optional[np.ndarray] = None
+            for level, key in enumerate(result_keys, start=1):
+                full_mask = _assemble_full_mask(
+                    levels["upper"][level - 1][frame_pos], levels["lower"][level - 1][frame_pos]
                 )
                 inclusive_masks[key][frame_key] = full_mask
-                frame_level[full_mask] = np.uint8(level_idx)
+                if frame_level is None:
+                    frame_level = np.zeros(full_mask.shape, dtype=np.uint8)
+                frame_level[full_mask] = np.uint8(level)
 
             frame_level_maps[frame_key] = frame_level
-            for level_idx, key in enumerate(result_keys, start=1):
-                exclusive_masks[key][frame_key] = frame_level == np.uint8(level_idx)
+            for level, key in enumerate(result_keys, start=1):
+                exclusive_masks[key][frame_key] = frame_level == np.uint8(level)
 
-        paths: Dict[str, Any] = {
-            "inclusive_masks": {},
-            "exclusive_masks": {},
-            "overlays": None,
-        }
+        paths: Dict[str, Any] = {"inclusive_masks": {}, "exclusive_masks": {}, "overlays": None}
 
         if save_masks:
             masks_root = self.owner.specimen.results_dir(overlay_dirname, "edge_multi", masks_dirname)
-            for level_idx, interface in enumerate(interface_list):
-                key = result_keys[level_idx]
+            for key, interface in zip(result_keys, interface_list):
                 inclusive_path = save_mask_bundle(inclusive_masks[key], masks_root / f"{key}_inclusive.npz")
                 exclusive_path = save_mask_bundle(exclusive_masks[key], masks_root / f"{key}_exclusive.npz")
                 paths["inclusive_masks"][key] = str(inclusive_path)
                 paths["exclusive_masks"][key] = str(exclusive_path)
-                store_interface_masks(
-                    interface,
-                    primary_path=inclusive_path,
-                    secondary_path=exclusive_path,
-                )
+                store_interface_masks(interface, primary_path=inclusive_path, secondary_path=exclusive_path)
 
+        labels = [_interface_legend_label(self.owner.specimen, interface) for interface in interface_list]
         if save_overlays:
             overlay_dir = self.owner.specimen.results_dir(overlay_dirname, "edge_multi", "overlays")
-            labels = [
-                _interface_legend_label(self.owner.specimen, interface)
-                for interface in interface_list
-            ]
-            if raw_stack is None:
-                raise ValueError("Cannot save overlays without a full raw image stack.")
-            for frame_pos, frame_idx in enumerate(frame_indices):
+            for frame_idx in frame_indices:
                 frame_key = f"frame_{frame_idx:04d}"
-                raw_frame = _ensure_uint8(raw_stack[frame_idx])
-                frame_masks = [exclusive_masks[key][frame_key] for key in result_keys]
-                save_path = overlay_dir / f"edge_multi_overlay_{frame_idx:04d}.png"
                 _save_multi_level_overlay(
-                    raw_frame=raw_frame,
-                    level_masks=frame_masks,
+                    raw_frame=_ensure_uint8(raw_stack[frame_idx]),
+                    level_masks=[exclusive_masks[key][frame_key] for key in result_keys],
                     labels=labels,
                     colors=display_colors,
-                    save_path=save_path,
+                    save_path=overlay_dir / f"edge_multi_overlay_{frame_idx:04d}.png",
                 )
             paths["overlays"] = str(overlay_dir)
 
         result: Dict[str, Any] = {
             "interfaces": [
-                {
-                    "key": result_keys[idx],
-                    "name": interface.name,
-                    "label": _interface_legend_label(self.owner.specimen, interface),
-                    "color_rgba": display_colors[idx],
-                }
-                for idx, interface in enumerate(interface_list)
+                {"key": key, "name": interface.name, "label": label, "color_rgba": color}
+                for key, interface, label, color in zip(result_keys, interface_list, labels, display_colors)
             ],
             "frame_indices": frame_indices,
             "frame_level_maps": frame_level_maps,
@@ -922,7 +726,6 @@ class EdgeDetector:
                 "secondary_similarity_threshold": multi_params["secondary_similarity_threshold"],
             },
         }
-
         if return_masks:
             result["inclusive_masks"] = inclusive_masks
             result["exclusive_masks"] = exclusive_masks
@@ -930,22 +733,49 @@ class EdgeDetector:
             result["debug"] = debug_levels
         return result
 
+    @staticmethod
+    def _attribute_deeper_level(
+        candidates: List[np.ndarray],
+        *,
+        parent: List[np.ndarray],
+        frame_indices: List[int],
+        parent_delay: int,
+        start_frame: Optional[int],
+        keep_masks: bool,
+    ) -> Tuple[List[np.ndarray], List[Dict[str, Any]]]:
+        """Latch the candidate pixels that lie inside the parent interface's mask.
+
+        The parent mask is taken ``parent_delay`` frames back, so its
+        still-growing front is left out. Only regions touching the specimen
+        edge are kept.
+        """
+        accumulated = np.zeros_like(candidates[0], dtype=bool)
+        latched: List[np.ndarray] = []
+        diagnostics: List[Dict[str, Any]] = []
+        for frame_pos, candidate in enumerate(candidates):
+            if start_frame is not None and frame_indices[frame_pos] < start_frame:
+                latched.append(accumulated.copy())
+                diagnostics.append({"_masks": {}, "connected_pixels": 0})
+                continue
+
+            settled_parent = np.asarray(parent[max(0, frame_pos - parent_delay)], dtype=bool)
+            connected = _filter_specimen_edge_connected(candidate & settled_parent)
+            accumulated = _filter_specimen_edge_connected(accumulated | connected)
+            latched.append(accumulated.copy())
+            diagnostics.append({
+                "_masks": {"connected_mask": connected} if keep_masks else {},
+                "connected_pixels": int(connected.sum()),
+            })
+        return latched, diagnostics
+
     def _resolve_multi_params(self, params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        """Merge and validate multi-interface attribution parameters."""
-        resolved = {
+        """Defaults and type checks for ``secondary_params``."""
+        resolved: Dict[str, Any] = {
             "secondary_similarity_threshold": 0.6,
             "min_primary_frac_for_secondary": 0.0,
-            # Optional[int]: 0-based position in the sampled stack at or after which
-            # secondary accumulation begins. Frames at position < this value produce zero
-            # secondary output. None means no gate (secondary runs from the first frame).
-            # Callers are responsible for converting external frame IDs to sample positions.
             "secondary_start_frame": None,
         }
-        if params:
-            for key in resolved:
-                if key in params:
-                    resolved[key] = params[key]
-
+        resolved.update({key: params[key] for key in resolved if params and key in params})
         resolved["secondary_similarity_threshold"] = float(resolved["secondary_similarity_threshold"])
         resolved["min_primary_frac_for_secondary"] = float(resolved["min_primary_frac_for_secondary"])
         if resolved["secondary_start_frame"] is not None:
@@ -953,22 +783,8 @@ class EdgeDetector:
         return resolved
 
     @staticmethod
-    def _assemble_full_mask(
-        *,
-        shape: Tuple[int, int],
-        split_row: int,
-        upper_mask: np.ndarray,
-        lower_mask_flipped: np.ndarray,
-    ) -> np.ndarray:
-        """Combine upper/lower half masks into one full-frame mask."""
-        full = np.zeros(shape, dtype=bool)
-        full[:split_row, :] = np.asarray(upper_mask, dtype=bool)
-        full[split_row:, :] = np.flipud(np.asarray(lower_mask_flipped, dtype=bool))
-        return full
-
-    @staticmethod
     def _build_interface_result_keys(interfaces: Sequence[Interface]) -> List[str]:
-        """Build unique filesystem-safe result keys from interface names."""
+        """Unique, file-safe keys for the interfaces, based on their names."""
         seen: Dict[str, int] = {}
         keys: List[str] = []
         for idx, interface in enumerate(interfaces):
@@ -977,21 +793,17 @@ class EdgeDetector:
             base = base.strip("_") or f"interface_{idx + 1}"
             count = seen.get(base, 0)
             seen[base] = count + 1
-            if count == 0:
-                keys.append(base)
-            else:
-                keys.append(f"{base}_{count + 1}")
+            keys.append(base if count == 0 else f"{base}_{count + 1}")
         return keys
 
     def _resolve_primary_params(self, params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        """Merge and validate primary edge detector parameters.
+        """Fill in the default edge parameters and check the given ones.
 
-        ``hard_floor`` is expressed as an intensity fraction in normalized space
-        (``0.0``-``1.0``). The default ``0.90`` is chosen after internal
-        delamination tuning; for reference, Glud/Bender-style crack workflows are
-        often configured around ``0.96``. Percentile-based scaling is the default
-        normalization path; fixed ``scale_min``/``scale_max`` values override it
-        when either bound is provided explicitly.
+        ``hard_floor`` is a fraction of full intensity: pixels brighter than
+        it are never damage. The default 0.90 comes from tuning on our
+        specimens; Glud/Bender crack detection is often run at about 0.96.
+        Unless ``scale_min`` or ``scale_max`` is set, the image is scaled
+        between two percentiles.
         """
         resolved = {
             "window_edge": (0, 60),
@@ -1015,14 +827,11 @@ class EdgeDetector:
         if params:
             resolved.update(params)
 
-        window_edge = _resolve_pair(resolved["window_edge"], name="window_edge", caster=int)
-        gaussian_filters = _resolve_pair(resolved["gaussian_filters"], name="gaussian_filters", caster=float)
-
         seed_ratio = float(resolved["seed_ratio"])
         if seed_ratio <= 0:
             raise ValueError("seed_ratio must be > 0.")
 
-        connectivity_mode = str(resolved.get("connectivity_mode", "directional")).strip().lower()
+        connectivity_mode = str(resolved["connectivity_mode"]).strip().lower()
         if connectivity_mode == "legacy_flood":
             raise ValueError(
                 "connectivity_mode='legacy_flood' has been removed; "
@@ -1031,35 +840,28 @@ class EdgeDetector:
         if connectivity_mode not in {"directional", "columnwise"}:
             raise ValueError("connectivity_mode must be 'directional' or 'columnwise'.")
 
-        resolved["window_edge"] = window_edge
-        resolved["gaussian_filters"] = gaussian_filters
-        resolved["scale_min"] = _resolve_optional_float(resolved["scale_min"])
-        resolved["scale_max"] = _resolve_optional_float(resolved["scale_max"])
-        resolved["scale_min_percentile"] = _resolve_optional_float(resolved.get("scale_min_percentile"))
-        resolved["scale_max_percentile"] = _resolve_optional_float(resolved.get("scale_max_percentile"))
-        resolved["seed_ratio"] = seed_ratio
-        resolved["connectivity_mode"] = connectivity_mode
-        lateral_px = resolved.get("directional_lateral_drift_px")
-        resolved["directional_lateral_drift_px"] = None if lateral_px is None else max(0, int(lateral_px))
-        resolved["directional_lateral_drift_scale"] = max(
-            0.0,
-            float(resolved.get("directional_lateral_drift_scale", 0.25)),
+        def optional_int(value: Any) -> Optional[int]:
+            return None if value is None else int(value)
+
+        lateral_px = resolved["directional_lateral_drift_px"]
+        resolved.update(
+            window_edge=_resolve_pair(resolved["window_edge"], name="window_edge", caster=int),
+            gaussian_filters=_resolve_pair(resolved["gaussian_filters"], name="gaussian_filters", caster=float),
+            scale_min=_resolve_optional_float(resolved["scale_min"]),
+            scale_max=_resolve_optional_float(resolved["scale_max"]),
+            scale_min_percentile=_resolve_optional_float(resolved["scale_min_percentile"]),
+            scale_max_percentile=_resolve_optional_float(resolved["scale_max_percentile"]),
+            seed_ratio=seed_ratio,
+            connectivity_mode=connectivity_mode,
+            directional_lateral_drift_px=None if lateral_px is None else max(0, int(lateral_px)),
+            directional_lateral_drift_scale=max(0.0, float(resolved["directional_lateral_drift_scale"])),
+            hard_floor=_resolve_hard_floor_ratio(resolved["hard_floor"]),
+            post_threshold_closing_px=max(0, int(resolved["post_threshold_closing_px"])),
+            post_threshold_closing_scale=_resolve_pos_scale(resolved["post_threshold_closing_scale"]),
+            post_threshold_closing_radius=optional_int(resolved["post_threshold_closing_radius"]),
+            pre_threshold_closing_radius=optional_int(resolved["pre_threshold_closing_radius"]),
+            min_object_px=max(0, int(resolved["min_object_px"])),
         )
-        hard_floor = resolved.get("hard_floor")
-        resolved["hard_floor"] = _resolve_hard_floor_ratio(hard_floor)
-        resolved["post_threshold_closing_px"] = max(0, int(resolved.get("post_threshold_closing_px", 4)))
-        resolved["post_threshold_closing_scale"] = _resolve_pos_scale(resolved.get("post_threshold_closing_scale"))
-        resolved["post_threshold_closing_radius"] = (
-            None
-            if resolved.get("post_threshold_closing_radius") is None
-            else int(resolved["post_threshold_closing_radius"])
-        )
-        resolved["pre_threshold_closing_radius"] = (
-            None
-            if resolved.get("pre_threshold_closing_radius") is None
-            else int(resolved["pre_threshold_closing_radius"])
-        )
-        resolved["min_object_px"] = max(0, int(resolved.get("min_object_px", 0)))
         return resolved
 
     def _process_edge_slice(
@@ -1070,74 +872,47 @@ class EdgeDetector:
         params: Dict[str, Any],
         avg_crack_width_px: float,
     ) -> Dict[str, Any]:
-        """Run edge segmentation, reconstruction, and latching on one slice."""
-        slice_uint8 = _ensure_uint8(slice_img)
+        """Detect edge damage in one half-frame (specimen edge at row 0) and latch it onto ``prev_latched``.
 
-        wy = max(1, int(params["window_edge"][0]))
-        wx = max(1, int(params["window_edge"][1]))
-        filtered_max = ndi.maximum_filter(slice_uint8, size=(wy, wx), mode="reflect")
-        filtered_min = ndi.minimum_filter(filtered_max, size=(wy, wx), mode="reflect")
-        sharpened = unsharp_mask(
-            filtered_min,
-            radius=float(avg_crack_width_px),
-            amount=2.0,
-            preserve_range=True,
+        All intermediate images are returned too, for debugging and figures.
+        """
+        filtered_max, filtered_min, sharpened, smoothed = _smooth_for_threshold(
+            _ensure_uint8(slice_img), params["window_edge"], params["gaussian_filters"], avg_crack_width_px
         )
 
-        smoothed = ndi.gaussian_filter(sharpened, params["gaussian_filters"])
-
+        # Explicit scale bounds win; otherwise stretch between two percentiles of the slice.
         scale_min = params.get("scale_min")
         scale_max = params.get("scale_max")
-        pct_min = params.get("scale_min_percentile")
-        pct_max = params.get("scale_max_percentile")
-        if scale_min is None and scale_max is None and pct_min is not None and pct_max is not None:
-            p_min = float(np.percentile(smoothed, float(pct_min)))
-            p_max = float(np.percentile(smoothed, float(pct_max)))
-            if np.isfinite(p_min) and np.isfinite(p_max) and p_max > p_min:
-                scale_min, scale_max = p_min, p_max
-        if scale_min is None:
-            scale_min = 150.0
-        if scale_max is None:
-            scale_max = 255.0
-        scale_min = float(scale_min)
-        scale_max = float(scale_max)
-        if scale_max > scale_min:
-            constant_scaled = np.clip((smoothed.astype(np.float32) - scale_min) / (scale_max - scale_min), 0.0, 1.0)
-        else:
-            constant_scaled = np.zeros_like(smoothed, dtype=np.float32)
-
+        if scale_min is None and scale_max is None:
+            percentiles = _percentile_range(
+                smoothed, params.get("scale_min_percentile"), params.get("scale_max_percentile")
+            )
+            if percentiles is not None:
+                scale_min, scale_max = percentiles
+        constant_scaled = _scale_to_unit(
+            smoothed,
+            150.0 if scale_min is None else float(scale_min),
+            255.0 if scale_max is None else float(scale_max),
+        )
         closed = constant_scaled
 
-        fallback = self.owner._images_threshold(closed, params["window_edge"])
-        if params["threshold_strategy"] == "kmeans":
-            thresh = self.owner._kmeans_threshold(closed, fallback)
-        else:
-            thresh = fallback
+        thresh = _kmeans_split(closed) if params["threshold_strategy"] == "kmeans" else None
+        if thresh is None:
+            thresh = _minmax_otsu_threshold(closed, params["window_edge"])
 
-        hard_floor = params.get("hard_floor")
-        hard_floor_eff: Optional[float]
-        if hard_floor is None:
-            hard_floor_eff = None
-            floor_mask = np.ones_like(smoothed, dtype=bool)
-        else:
-            hard_floor_eff = float(hard_floor)
-            smoothed_norm = smoothed.astype(np.float32) / 255.0
-            floor_mask = smoothed_norm <= hard_floor_eff
+        floor_mask, hard_floor_eff = _hard_floor_mask(smoothed, params.get("hard_floor"))
 
         binary = (closed < thresh) & floor_mask
-        radius_override = params.get("post_threshold_closing_radius")
-        if radius_override is None:
-            radius_override = params.get("post_threshold_closing_px")
-        if radius_override is None:
-            radius_override = params.get("pre_threshold_closing_radius")
-        if radius_override is not None:
-            close_radius = int(radius_override)
-        else:
+
+        close_radius = params.get("post_threshold_closing_radius")
+        if close_radius is None:
+            close_radius = params.get("post_threshold_closing_px")
+        if close_radius is None:
+            close_radius = params.get("pre_threshold_closing_radius")
+        if close_radius is None:
             close_scale = params.get("post_threshold_closing_scale")
-            if close_scale is None:
-                close_radius = 4
-            else:
-                close_radius = int(round(float(close_scale) * avg_crack_width_px))
+            close_radius = 4 if close_scale is None else round(float(close_scale) * avg_crack_width_px)
+        close_radius = int(close_radius)
 
         if close_radius > 0:
             binary_closed = closing(binary, disk(close_radius)).astype(bool)
@@ -1153,30 +928,22 @@ class EdgeDetector:
         if prev_latched is not None:
             combined_upper = np.asarray(prev_latched, dtype=bool) | combined_upper
 
-        height = combined_upper.shape[0]
-        seed_depth = max(1, int(round(float(params["seed_ratio"]) * height)))
+        seed_depth = max(1, int(round(float(params["seed_ratio"]) * combined_upper.shape[0])))
         connectivity_mode = str(params.get("connectivity_mode", "directional"))
-        lateral_drift_px_override = params.get("directional_lateral_drift_px")
-        if lateral_drift_px_override is None:
-            lateral_drift_px = max(
-                1,
-                int(round(float(params.get("directional_lateral_drift_scale", 0.25)) * float(avg_crack_width_px))),
-            )
+        lateral_drift_px = params.get("directional_lateral_drift_px")
+        if lateral_drift_px is None:
+            drift_scale = float(params.get("directional_lateral_drift_scale", 0.25))
+            lateral_drift_px = max(1, int(round(drift_scale * float(avg_crack_width_px))))
         else:
-            lateral_drift_px = max(0, int(lateral_drift_px_override))
+            lateral_drift_px = max(0, int(lateral_drift_px))
 
         primary_seed = np.zeros_like(combined_upper, dtype=np.uint8)
         primary_seed[:seed_depth, :] = combined_upper[:seed_depth, :].astype(np.uint8)
         if connectivity_mode == "columnwise":
-            primary_edge_snapshot = _rebuild_edge_connected_columnwise(
-                combined_upper,
-                seed_depth=seed_depth,
-            )
+            primary_edge_snapshot = _rebuild_edge_connected_columnwise(combined_upper, seed_depth=seed_depth)
         else:
             primary_edge_snapshot = _rebuild_edge_connected_directional(
-                combined_upper,
-                seed_depth=seed_depth,
-                lateral_drift_px=lateral_drift_px,
+                combined_upper, seed_depth=seed_depth, lateral_drift_px=lateral_drift_px
             )
 
         if prev_latched is None:
@@ -1193,11 +960,11 @@ class EdgeDetector:
             "constant_scaled": constant_scaled,
             "closed": closed,
             "threshold": float(thresh),
-            "hard_floor_eff": None if hard_floor_eff is None else float(hard_floor_eff),
+            "hard_floor_eff": hard_floor_eff,
             "binary": binary,
             "binary_closed": binary_closed,
-            "close_radius": int(close_radius),
-            "min_object_px": int(min_object_px),
+            "close_radius": close_radius,
+            "min_object_px": min_object_px,
             "mask": mask,
             "combined_upper": combined_upper,
             "primary_seed": primary_seed,

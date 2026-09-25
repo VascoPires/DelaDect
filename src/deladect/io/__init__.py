@@ -1,4 +1,4 @@
-"""IO helpers for specimens, cracks, and delamination artefacts."""
+"""Saving and loading specimens, cracks and delamination results."""
 
 from .cracks import (
     PLY_CRACK_RESULTS_KEY,

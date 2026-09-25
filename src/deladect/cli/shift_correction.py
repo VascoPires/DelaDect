@@ -8,7 +8,6 @@ to first select a folder containing the images to be processed, select the
 reference points and then perform the shift correction and strain evaluation (if desired). 
 The results will be saved in a subfolder of the selected folder or in an output folder
 defined by the user.
-
 """
 
 from __future__ import annotations

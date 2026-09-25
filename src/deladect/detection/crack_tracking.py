@@ -1,34 +1,22 @@
-"""Crack tracking primitives for the baseline-normalised diffuse workflow.
+"""Follow cracks from frame to frame.
 
-Public API
-----------
-CrackDetection
-    Immutable descriptor for a single detected crack segment.
-CrackTrack
-    Mutable tracker object accumulating per-frame history.
-normalize_detections(raw_cracks)
-    Convert raw segment arrays to :class:`CrackDetection` lists.
-match_tracks(tracks, detections, ...)
-    Greedy one-to-one track–detection assignment.
+:func:`normalize_detections` turns segments into
+:class:`CrackDetection` objects and :func:`match_tracks` links them to
+the :class:`CrackTrack` objects of the previous frames.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Sequence, Set, Tuple
 
 import numpy as np
 
 
-# ----------
-# Public data classes
-# ----------
-
-
 @dataclass(frozen=True)
 class CrackDetection:
-    """Geometric descriptor for a single detected crack segment."""
+    """Position, size and angle of one detected crack segment."""
 
     segment: np.ndarray
     center_yx: Tuple[float, float]
@@ -39,12 +27,10 @@ class CrackDetection:
 
 @dataclass
 class CrackTrack:
-    """Mutable tracker accumulating detections across frames.
+    """One crack followed across frames.
 
-    The ``active`` flag is set to ``False`` when a track is terminated
-    (no matching detection in a new frame). ``history`` is mutated in-place
-    during the tracking loop; each entry is a plain dict with at least
-    ``"frame_abs"`` and ``"status"`` keys.
+    ``active`` turns ``False`` once a frame has no matching detection.
+    ``history`` holds one ``{"frame_abs", "status", ...}`` dict per frame.
     """
 
     track_id: int
@@ -61,12 +47,8 @@ class CrackTrack:
     history: List[Dict[str, Any]] = field(default_factory=list)
 
 
-# ----------
-# Internal geometry helpers
-# ----------
-
-
 def _segment_features(seg: np.ndarray) -> CrackDetection:
+    """Center, length, angle and bounding box of a ``[[y0, x0], [y1, x1]]`` segment."""
     seg = np.asarray(seg, dtype=np.float32).reshape(2, 2)
     y0, x0 = seg[0]
     y1, x1 = seg[1]
@@ -105,31 +87,25 @@ def _bbox_iou(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> flo
     return float(inter / union) if union > 0 else 0.0
 
 
-# ----------
-# Public functions
-# ----------
-
-
 def normalize_detections(raw_cracks: Sequence[np.ndarray]) -> List[CrackDetection]:
-    """Convert a list of raw segment arrays to :class:`CrackDetection` objects.
+    """Turn crack segments into :class:`CrackDetection` objects.
 
     Parameters
     ----------
     raw_cracks:
-        Each element is an ``(N, 2, 2)`` or ``(2, 2)`` float array of
-        ``[[y0, x0], [y1, x1]]`` endpoint pairs.
+        Arrays of shape ``(n, 2, 2)`` or ``(2, 2)`` with
+        ``[[y0, x0], [y1, x1]]`` segments.
 
     Returns
     -------
     list[CrackDetection]
-        One entry per segment found across all arrays.
+        One per segment.
     """
-    detections: List[CrackDetection] = []
-    for crack in raw_cracks:
-        segs = np.asarray(crack, dtype=np.float32).reshape(-1, 2, 2)
-        for seg in segs:
-            detections.append(_segment_features(seg))
-    return detections
+    return [
+        _segment_features(seg)
+        for crack in raw_cracks
+        for seg in np.asarray(crack, dtype=np.float32).reshape(-1, 2, 2)
+    ]
 
 
 def match_tracks(
@@ -140,35 +116,38 @@ def match_tracks(
     max_angle_deg: float,
     max_cost: float,
 ) -> Tuple[Dict[int, int], List[int], List[int]]:
-    """Greedy one-to-one assignment of active tracks to new detections.
+    """Match active tracks to this frame's detections, cheapest pairs first.
+
+    A pair can match only if the centers are within ``max_center_px``
+    and the angles within ``max_angle_deg``. Its cost combines center
+    distance, angle difference, bounding-box overlap and length change.
 
     Parameters
     ----------
     tracks:
-        All known tracks (active and closed).
+        All tracks so far; inactive ones are ignored.
     detections:
-        Detections for the current frame.
+        Detections of the current frame.
     max_center_px:
-        Maximum centre-to-centre distance to consider a match.
+        Largest center-to-center distance of a match.
     max_angle_deg:
-        Maximum angle difference (in degrees, 0–90) to consider a match.
+        Largest angle difference of a match, in degrees.
     max_cost:
-        Assignments with cost above this value are rejected.
+        Pairs costing more than this are not matched.
 
     Raises
     ------
     ValueError
-        If a matching threshold is not finite, or if either distance/angle
-        threshold is non-positive.
+        If a limit is not finite, or a distance/angle limit is not positive.
 
     Returns
     -------
     matched : dict[int, int]
-        Map from track index to detection index for accepted matches.
+        Track index to detection index.
     unmatched_tracks : list[int]
-        Indices of active tracks with no match.
+        Active tracks without a match.
     unmatched_dets : list[int]
-        Indices of detections not assigned to any track.
+        Detections without a match.
     """
     max_center_px = float(max_center_px)
     max_angle_deg = float(max_angle_deg)
@@ -180,17 +159,16 @@ def match_tracks(
     if not math.isfinite(max_cost) or max_cost < 0:
         raise ValueError("max_cost must be a finite value greater than or equal to zero.")
 
+    # Score every plausible (track, detection) pair, then accept the cheapest pairs greedily.
     candidates: List[Tuple[float, int, int]] = []
-    eps = 1e-6
     for ti, track in enumerate(tracks):
         if not track.active:
             continue
         t_feat = _segment_features(track.last_segment)
-        t_center = t_feat.center_yx
-        t_len = max(track.last_length_px, eps)
+        ty, tx = t_feat.center_yx
+        t_len = max(track.last_length_px, 1e-6)
         for di, det in enumerate(detections):
             cy, cx = det.center_yx
-            ty, tx = t_center
             center_dist = float(math.hypot(cy - ty, cx - tx))
             angle_diff = abs(det.angle_deg - t_feat.angle_deg)
             angle_diff = min(angle_diff, 180.0 - angle_diff)

@@ -1,4 +1,4 @@
-"""Detection workflows (cracks + delamination)."""
+"""Crack and delamination detection."""
 
 from .crack_detection import crack_analysis, crack_eval, plot_cracks
 from .crack_tracking import CrackDetection, CrackTrack, match_tracks, normalize_detections

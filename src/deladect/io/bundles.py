@@ -1,4 +1,4 @@
-"""Low-level NPZ bundle helpers used by IO modules."""
+"""Read and write dictionaries of arrays as compressed ``.npz`` files."""
 
 from __future__ import annotations
 
@@ -8,24 +8,26 @@ from typing import Dict
 import numpy as np
 
 
+def with_extension(path: Path, extension: str) -> Path:
+    """Add ``extension`` (e.g. ``".npz"``) to ``path`` unless it already has it."""
+    path = Path(path)
+    if path.suffix.lower() != extension:
+        path = path.with_suffix(path.suffix + extension)
+    return path
+
+
 def save_npz_bundle(data: Dict[str, np.ndarray], path: Path) -> Path:
-    """Write a non-empty key-to-array payload to compressed NPZ."""
+    """Save ``data`` to a compressed ``.npz`` file and return the path written."""
     if not data:
         raise ValueError("Refusing to store an empty data bundle.")
-    resolved = Path(path)
-    if resolved.suffix.lower() != ".npz":
-        resolved = (
-            resolved.with_suffix(resolved.suffix + ".npz")
-            if resolved.suffix
-            else resolved.with_suffix(".npz")
-        )
+    resolved = with_extension(path, ".npz")
     resolved.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(resolved, **data)
     return resolved
 
 
 def load_npz_bundle(path: Path) -> Dict[str, np.ndarray]:
-    """Load a compressed NPZ bundle into a plain dictionary."""
+    """Load an ``.npz`` file into a plain dict."""
     resolved = Path(path)
     if not resolved.exists():
         raise FileNotFoundError(resolved)
