@@ -4,36 +4,34 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from scipy import ndimage as ndi
 from skimage.filters import threshold_otsu
 from skimage.morphology import closing, disk
 
+from deladect.io import layout as layout_io
+
 from ._common import (
     CrackInput,
     _Progress,
-    _auto_preprocess_cache_paths,
-    _coerce_cracks_by_frame,
-    _crack_input_frame_count,
+    _cracks_by_frame,
     _ensure_uint8,
-    _fetch_region_override_stacks,
     _frame_to_float,
     _hard_floor_mask,
     _kmeans_split,
     _percentile_range,
-    _region_override_raw_frame,
     _resolve_hard_floor_ratio,
     _resolve_optional_float,
     _resolve_pair,
     _resolve_pos_scale,
-    _result_key_token,
     _scale_to_unit,
     _smooth_for_threshold,
 )
 from ._overlays import _save_diffuse_overlay
-from ._preprocess import _reference_anchor_index, _reference_settings_from_cache_paths, _reference_window_bounds
+from ._frames import PreprocessedFrames, resolve_frames
+from ._preprocess import _reference_anchor_index, _reference_window_bounds
 
 if TYPE_CHECKING:
     from .core import DelaminationDetector
@@ -111,16 +109,18 @@ class DiffuseDetector:
         cracks:
             Cracks per frame, or the result of
             :func:`~deladect.detection.crack_analysis` (all orientations are
-            used).
+            used). There must be one entry per frame.
         processed_cache_paths, processed_stack:
             Preprocessed frames, as cache files or arrays. If neither is
             given, the full stack is preprocessed with a static reference.
+            In region mode the middle rows are cut from these full frames.
         save_overlays:
             Save a diffuse overlay per frame.
         overlay_dirname:
             Output folder under the specimen results.
         max_frames:
-            Process only the first ``max_frames`` frames.
+            Process only the first ``max_frames`` frames (at least 1), of
+            both the images and the cracks.
         params:
             Diffuse parameter overrides. ``crack_frame_policy`` picks which
             frame's cracks are used for each frame: ``"current"``,
@@ -132,8 +132,10 @@ class DiffuseDetector:
             Print progress.
         crack_coordinate_space:
             ``"middle"`` if the cracks were detected on the middle region
-            stack, ``"full"`` if on the full frames. Used to place the cracks
-            on overlays in region mode.
+            stack, ``"full"`` if on the full frames. Only used to place the
+            cracks on overlays in region mode. Detection in region mode needs
+            cracks from the middle region stack; if the last frame has cracks
+            outside the middle region, a ``ValueError`` is raised.
 
         Returns
         -------
@@ -143,76 +145,72 @@ class DiffuseDetector:
         """
         if cracks is None:
             raise ValueError("Diffuse delamination requires `cracks` to be provided.")
-        if processed_cache_paths and processed_stack:
-            raise ValueError("Provide either processed_cache_paths or processed_stack, not both.")
         if crack_coordinate_space not in {"middle", "full"}:
             raise ValueError("crack_coordinate_space must be one of: 'middle', 'full'.")
-
-        if self.owner._uses_stack_overrides():
-            return self._diffuse_delamination_region_overrides(
-                cracks=cracks,
-                processed_cache_paths=processed_cache_paths,
-                save_overlays=save_overlays,
-                overlay_dirname=overlay_dirname,
-                max_frames=max_frames,
-                params=params,
-                debug=debug,
-                progress=progress,
-                crack_coordinate_space=crack_coordinate_space,
-            )
-
         raw_stack = getattr(self.owner.specimen, "image_stack_full", None)
         if save_overlays and raw_stack is None:
             raise ValueError("Cannot save overlays without a full raw image stack.")
 
-        cracks_list = _coerce_cracks_by_frame(cracks, _crack_input_frame_count(cracks))
-        if processed_cache_paths is None and processed_stack is None:
-            processed_cache_paths = _auto_preprocess_cache_paths(
-                self.owner,
-                save_overlays=save_overlays,
-                max_frames=max_frames,
-                progress=progress,
-                key_prefix="diffuse_auto",
-            )
+        frames = resolve_frames(
+            self.owner,
+            processed_cache_paths=processed_cache_paths,
+            processed_stack=processed_stack,
+            max_frames=max_frames,
+            auto_key="diffuse_auto",
+            save_previews=save_overlays,
+            progress=progress,
+        )
+        cracks_by_frame = _cracks_by_frame(cracks, len(frames), max_frames)
+        self.owner.layout.check_cracks_in_middle(cracks_by_frame)
+        return self._detect(
+            frames,
+            cracks_by_frame,
+            params=self._resolve_diffuse_params(params),
+            save_overlays=save_overlays,
+            overlay_dirname=overlay_dirname,
+            debug=debug,
+            progress=progress,
+            crack_coordinate_space=crack_coordinate_space,
+        )
 
-        diffuse_params = self._resolve_diffuse_params(params)
+    def _detect(
+        self,
+        frames: PreprocessedFrames,
+        cracks_list: List[Any],
+        *,
+        params: Dict[str, Any],
+        save_overlays: bool,
+        overlay_dirname: str,
+        debug: bool,
+        progress: bool,
+        crack_coordinate_space: str,
+    ) -> Dict[str, Any]:
+        """Detect diffuse damage in the diffuse rows of every frame and latch the masks."""
+        layout = self.owner.layout
+        rows = layout.diffuse_rows()
+        row_offset = 0 if rows is None else rows[0]
+        search_frames = frames if rows is None else frames.rows(*rows)
+        raw_stack = getattr(self.owner.specimen, "image_stack_full", None)
+        overlay_dir = layout_io.overlay_dir(self.owner.specimen, overlay_dirname, "diffuse") if save_overlays else None
         diffuse_masks: Dict[str, np.ndarray] = {}
-        debug_payloads = self._new_debug_payload(diffuse_params) if debug else None
-
-        frames: Iterable[Tuple[int, np.ndarray, Optional[Dict[str, Any]]]]
-        if processed_stack is not None:
-            total_frames = len(processed_stack)
-            frames = ((idx, frame, None) for idx, frame in enumerate(processed_stack))
-        else:
-            total_frames = len(processed_cache_paths)
-            frames = self.owner.iter_preprocessed_cache_with_metadata(processed_cache_paths)
-        if cracks_list:
-            total_frames = min(total_frames, len(cracks_list))
-        if max_frames is not None:
-            total_frames = min(total_frames, max_frames)
-
-        overlay_dir = self.owner.specimen.results_dir(overlay_dirname, "diffuse", "overlays") if save_overlays else None
-        progress_log = _Progress("diffuse_delamination", total_frames, progress)
+        debug_payloads = self._new_debug_payload(params) if debug else None
         latched: Optional[np.ndarray] = None
+        progress_log = _Progress("diffuse_delamination", len(frames), progress)
 
-        for idx, processed, frame_meta in frames:
-            if idx >= total_frames:
-                break
-
+        for idx, processed, frame_meta in search_frames.with_metadata():
             crack_idx, ref_start, ref_end = self._resolve_diffuse_crack_index(
                 frame_idx=idx,
                 cracks_count=len(cracks_list),
-                params=diffuse_params,
+                params=params,
                 frame_meta=frame_meta,
             )
             frame_cracks = cracks_list[crack_idx] if 0 <= crack_idx < len(cracks_list) else []
             if frame_cracks is None:
                 frame_cracks = []
 
-            mask_full, bounds_list, hard_floors, threshold = self._frame_roi_mask(processed, frame_cracks, diffuse_params)
-            if latched is not None:
-                mask_full |= latched
-            latched = mask_full.copy()
+            mask, bounds_list, hard_floors, threshold = self._frame_roi_mask(processed, frame_cracks, params)
+            latched = mask if latched is None else mask | latched
+            mask_full = layout.diffuse_to_full(latched)
 
             frame_key = f"frame_{idx:04d}"
             diffuse_masks[frame_key] = mask_full
@@ -221,8 +219,8 @@ class DiffuseDetector:
                 _save_diffuse_overlay(
                     _ensure_uint8(raw_stack[idx]),
                     mask_full,
-                    overlay_dir / f"diffuse_overlay_{idx:04d}.png",
-                    cracks=frame_cracks,
+                    overlay_dir / layout_io.overlay_name("diffuse", idx),
+                    cracks=layout.cracks_for_display(frame_cracks, crack_coordinate_space),
                 )
 
             if debug_payloads is not None:
@@ -231,115 +229,12 @@ class DiffuseDetector:
                     "crack_count": len(frame_cracks),
                     "crack_idx_used": int(crack_idx),
                     "reference_window": [int(ref_start), int(ref_end)],
-                    "roi_bounds": bounds_list,
+                    "roi_bounds": [
+                        (y_lo + row_offset, y_hi + row_offset, x_lo, x_hi) for y_lo, y_hi, x_lo, x_hi in bounds_list
+                    ],
                     "threshold": threshold,
                     "hard_floor_eff_min": float(np.min(hard_floor_values)) if hard_floor_values else None,
                     "hard_floor_eff_max": float(np.max(hard_floor_values)) if hard_floor_values else None,
-                }
-
-            progress_log.update(idx + 1)
-
-        progress_log.done()
-        return {"masks": diffuse_masks, "debug": debug_payloads}
-
-    def _diffuse_delamination_region_overrides(
-        self,
-        *,
-        cracks: CrackInput,
-        processed_cache_paths: Optional[List[Path]] = None,
-        save_overlays: bool = False,
-        overlay_dirname: str = "delamination",
-        max_frames: Optional[int] = None,
-        params: Optional[Dict[str, Any]] = None,
-        debug: bool = False,
-        progress: bool = False,
-        crack_coordinate_space: str = "middle",
-    ) -> Dict[str, Any]:
-        """Diffuse detection on the middle region stack; masks are returned in full-frame coordinates."""
-        cracks_list = _coerce_cracks_by_frame(cracks, _crack_input_frame_count(cracks))
-        if not cracks_list:
-            raise ValueError("Diffuse delamination requires at least one crack frame.")
-
-        upper_stack, middle_stack, lower_stack, raw_stack, total_frames = _fetch_region_override_stacks(
-            self.owner,
-            domain="diffuse",
-            max_frames=max_frames,
-            extra_frame_counts={"cracks": len(cracks_list)},
-        )
-
-        diffuse_params = self._resolve_diffuse_params(params)
-        if diffuse_params.get("reference_mode") is None:
-            diffuse_params.update(_reference_settings_from_cache_paths(processed_cache_paths))
-
-        middle_cache_paths = self.owner.preprocess_stack_to_disk(
-            middle_stack,
-            key=f"diffuse_middle_auto_{_result_key_token(self.owner.interface.name)}",
-            max_frames=total_frames,
-            cache_dirname="Preprocessor_cache",
-            history_mode="running",
-            history_window_size=None,
-            reference_mode=str(diffuse_params.get("reference_mode") or "static"),
-            reference_window=int(diffuse_params.get("reference_window") or 1),
-            reference_skip=int(diffuse_params.get("reference_skip") or 0),
-            progress=progress,
-        )["cache_paths"]
-
-        diffuse_masks: Dict[str, np.ndarray] = {}
-        debug_payloads = self._new_debug_payload(diffuse_params) if debug else None
-        overlay_dir = self.owner.specimen.results_dir(overlay_dirname, "diffuse", "overlays") if save_overlays else None
-        latched_middle: Optional[np.ndarray] = None
-        progress_log = _Progress("diffuse_delamination", total_frames, progress)
-
-        for idx, processed_middle, frame_meta in self.owner.iter_preprocessed_cache_with_metadata(middle_cache_paths):
-            if idx >= total_frames:
-                break
-
-            upper_h = int(np.asarray(upper_stack[idx]).shape[0])
-            lower_h = int(np.asarray(lower_stack[idx]).shape[0])
-            middle_h, width = processed_middle.shape[:2]
-
-            crack_idx, ref_start, ref_end = self._resolve_diffuse_crack_index(
-                frame_idx=idx,
-                cracks_count=len(cracks_list),
-                params=diffuse_params,
-                frame_meta=frame_meta,
-            )
-            frame_cracks = cracks_list[crack_idx] if 0 <= crack_idx < len(cracks_list) else []
-
-            mask_middle, bounds_list, hard_floors, threshold = self._frame_roi_mask(
-                processed_middle, frame_cracks, diffuse_params
-            )
-            if latched_middle is None:
-                latched_middle = np.zeros_like(mask_middle, dtype=bool)
-            latched_middle = np.logical_or(latched_middle, mask_middle)
-
-            mask_full = np.zeros((upper_h + middle_h + lower_h, width), dtype=bool)
-            mask_full[upper_h:upper_h + middle_h, :] = latched_middle
-
-            frame_key = f"frame_{idx:04d}"
-            diffuse_masks[frame_key] = mask_full
-
-            if overlay_dir is not None:
-                raw_frame = _region_override_raw_frame(
-                    raw_stack, idx, mask_full.shape[:2], upper_stack[idx], middle_stack[idx], lower_stack[idx]
-                )
-                overlay_cracks = self.owner._cracks_for_full_overlay(
-                    frame_cracks,
-                    shift=(crack_coordinate_space == "middle"),
-                    upper_height=upper_h,
-                )
-                _save_diffuse_overlay(
-                    raw_frame, mask_full, overlay_dir / f"diffuse_overlay_{idx:04d}.png", cracks=overlay_cracks
-                )
-
-            if debug_payloads is not None:
-                debug_payloads["frames"][frame_key] = {
-                    "threshold": threshold,
-                    "bounds": [(y_lo + upper_h, y_hi + upper_h, x_lo, x_hi) for y_lo, y_hi, x_lo, x_hi in bounds_list],
-                    "roi_count": len(hard_floors),
-                    "crack_frame_index": int(crack_idx),
-                    "reference_window": [int(ref_start), int(ref_end)],
-                    "frame_meta": frame_meta,
                 }
 
             progress_log.update(idx + 1)

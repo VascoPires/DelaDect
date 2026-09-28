@@ -2,32 +2,28 @@
 
 from __future__ import annotations
 
-from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, Iterator, List, NamedTuple, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from scipy import ndimage as ndi
 from skimage.morphology import closing, disk
 
+from deladect.io import layout as layout_io
 from deladect.io.delamination import save_mask_bundle, store_interface_masks
 from deladect.specimen import Interface
 
 from ._common import (
     _Progress,
-    _auto_preprocess_cache_paths,
     _ensure_uint8,
-    _fetch_region_override_stacks,
     _hard_floor_mask,
     _kmeans_split,
     _minmax_otsu_threshold,
     _percentile_range,
-    _region_override_raw_frame,
     _resolve_hard_floor_ratio,
     _resolve_optional_float,
     _resolve_pair,
     _resolve_pos_scale,
-    _result_key_token,
     _scale_to_unit,
     _smooth_for_threshold,
 )
@@ -39,7 +35,8 @@ from ._overlays import (
     _save_edge_overlay,
     _save_multi_level_overlay,
 )
-from ._preprocess import _reference_settings_from_cache_paths
+from ._frames import DEFAULT_REFERENCE, PreprocessedFrames, resolve_frames
+from ._regions import RegionLayout
 
 if TYPE_CHECKING:
     from .core import DelaminationDetector
@@ -129,16 +126,6 @@ def _filter_specimen_edge_connected(mask: np.ndarray) -> np.ndarray:
     return np.isin(labeled, list(edge_labels))
 
 
-def _assemble_full_mask(upper: np.ndarray, lower_flipped: np.ndarray, middle_height: int = 0) -> np.ndarray:
-    """Stack the upper half, ``middle_height`` empty rows and the lower half flipped back."""
-    upper = np.asarray(upper, dtype=bool)
-    lower = np.flipud(np.asarray(lower_flipped, dtype=bool))
-    full = np.zeros((upper.shape[0] + middle_height + lower.shape[0], upper.shape[1]), dtype=bool)
-    full[: upper.shape[0], :] = upper
-    full[upper.shape[0] + middle_height :, :] = lower
-    return full
-
-
 def _primary_debug_payload(
     processed: np.ndarray,
     upper_result: Dict[str, Any],
@@ -149,16 +136,6 @@ def _primary_debug_payload(
         "upper": {key: upper_result[key] for key in _PRIMARY_DEBUG_KEYS},
         "lower": {key: lower_result[key] for key in _PRIMARY_DEBUG_KEYS},
     }
-
-
-class _EdgeFrame(NamedTuple):
-    """The two edge halves of one frame, as passed to :meth:`EdgeDetector._process_edge_slice`."""
-
-    idx: int
-    upper: np.ndarray
-    lower: np.ndarray  # not yet flipped
-    middle_height: int  # rows between the halves (region-override mode only)
-    raw_frame: Callable[[Tuple[int, int]], np.ndarray]  # display frame for a mask of the given shape
 
 
 class EdgeDetector:
@@ -199,7 +176,8 @@ class EdgeDetector:
             Preprocessed frames, as cache files or arrays. If neither is
             given, the full stack is preprocessed with
             ``reference_mode="static"``. Frames you pass should also use a
-            static reference.
+            static reference. In region mode the upper and lower rows are cut
+            from these full frames.
         save_overlays:
             Save an edge overlay per frame.
         overlay_dirname:
@@ -207,7 +185,7 @@ class EdgeDetector:
         overlay_view:
             ``"mask"``, ``"line"`` or ``"both"``.
         max_frames:
-            Process only the first ``max_frames`` frames.
+            Process only the first ``max_frames`` frames (at least 1).
         params:
             Edge parameter overrides.
         debug:
@@ -225,41 +203,25 @@ class EdgeDetector:
             ``{"masks": {frame_key: mask}, "debug": {...} or None}``, with
             keys like ``"frame_0003"``.
         """
-        if processed_cache_paths and processed_stack:
-            raise ValueError("Provide either processed_cache_paths or processed_stack, not both.")
         if overlay_view not in {"mask", "line", "both"}:
             raise ValueError("overlay_view must be one of: 'mask', 'line', 'both'.")
+        raw_stack = getattr(self.owner.specimen, "image_stack_full", None)
+        if save_overlays and raw_stack is None:
+            raise ValueError("Cannot save overlays without a full raw image stack.")
 
-        if self.owner._uses_stack_overrides():
-            edge_params = self._resolve_primary_params(params)
-            frames, total_frames = self._region_override_frames(processed_cache_paths, max_frames, params, progress)
-        else:
-            raw_stack = getattr(self.owner.specimen, "image_stack_full", None)
-            if save_overlays and raw_stack is None:
-                raise ValueError("Cannot save overlays without a full raw image stack.")
-            if processed_cache_paths is None and processed_stack is None:
-                processed_cache_paths = _auto_preprocess_cache_paths(
-                    self.owner,
-                    save_overlays=save_overlays,
-                    max_frames=max_frames,
-                    progress=progress,
-                    key_prefix="edge_primary_auto",
-                )
-            edge_params = self._resolve_primary_params(params)
-
-            if processed_stack is not None:
-                processed_iter: Iterable[Tuple[int, np.ndarray]] = enumerate(processed_stack)
-                total_frames = len(processed_stack)
-            else:
-                processed_iter = self.owner.iter_preprocessed_cache(processed_cache_paths)
-                total_frames = len(processed_cache_paths)
-            if max_frames is not None:
-                total_frames = min(total_frames, max_frames)
-            frames = self._full_frame_halves(processed_iter, total_frames, raw_stack)
-
-        return self._accumulate_primary(
+        edge_params = self._resolve_primary_params(params)
+        frames = resolve_frames(
+            self.owner,
+            processed_cache_paths=processed_cache_paths,
+            processed_stack=processed_stack,
+            max_frames=max_frames,
+            auto_key="edge_primary_auto",
+            save_previews=save_overlays,
+            progress=progress,
+            reference={key: edge_params[key] for key in DEFAULT_REFERENCE if key in edge_params},
+        )
+        return self._detect_primary(
             frames,
-            total_frames,
             edge_params=edge_params,
             save_overlays=save_overlays,
             overlay_dirname=overlay_dirname,
@@ -269,82 +231,9 @@ class EdgeDetector:
             debug_root=self.owner.specimen.results_dir(debug_dirname) if save_debug_outputs else None,
         )
 
-    @staticmethod
-    def _full_frame_halves(
-        processed_iter: Iterable[Tuple[int, np.ndarray]],
-        total_frames: int,
-        raw_stack: Optional[Sequence[np.ndarray]],
-    ) -> Iterator[_EdgeFrame]:
-        def raw_frame(idx: int, processed: np.ndarray, _shape: Tuple[int, int]) -> np.ndarray:
-            return _ensure_uint8(raw_stack[idx]) if raw_stack is not None else processed
-
-        for idx, processed in processed_iter:
-            if idx >= total_frames:
-                break
-            split_row = processed.shape[0] // 2
-            yield _EdgeFrame(
-                idx,
-                processed[:split_row, :],
-                processed[split_row:, :],
-                0,
-                partial(raw_frame, idx, processed),
-            )
-
-    def _region_override_frames(
+    def _detect_primary(
         self,
-        processed_cache_paths: Optional[List[Path]],
-        max_frames: Optional[int],
-        params: Optional[Dict[str, Any]],
-        progress: bool,
-    ) -> Tuple[Iterator[_EdgeFrame], int]:
-        """Preprocess the upper and lower region stacks; return their frames and the frame count."""
-        upper_stack, middle_stack, lower_stack, raw_stack, total_frames = _fetch_region_override_stacks(
-            self.owner, domain="edge", max_frames=max_frames
-        )
-
-        reference = _reference_settings_from_cache_paths(processed_cache_paths)
-        reference.update({key: (params or {})[key] for key in reference if key in (params or {})})
-        token = _result_key_token(self.owner.interface.name)
-        upper_cache_paths, lower_cache_paths = (
-            self.owner.preprocess_stack_to_disk(
-                stack,
-                key=f"edge_{side}_auto_{token}",
-                max_frames=total_frames,
-                cache_dirname="Preprocessor_cache",
-                history_mode="running",
-                history_window_size=None,
-                reference_mode=str(reference["reference_mode"]),
-                reference_window=int(reference["reference_window"]),
-                reference_skip=int(reference["reference_skip"]),
-                progress=progress,
-            )["cache_paths"]
-            for side, stack in (("upper", upper_stack), ("lower", lower_stack))
-        )
-
-        def raw_frame(idx: int, middle_raw: np.ndarray, shape: Tuple[int, int]) -> np.ndarray:
-            return _region_override_raw_frame(raw_stack, idx, shape, upper_stack[idx], middle_raw, lower_stack[idx])
-
-        def frames() -> Iterator[_EdgeFrame]:
-            upper_iter = self.owner.iter_preprocessed_cache(upper_cache_paths)
-            lower_iter = self.owner.iter_preprocessed_cache(lower_cache_paths)
-            for (idx, upper_processed), (_, lower_processed) in zip(upper_iter, lower_iter):
-                if idx >= total_frames:
-                    break
-                middle_raw = _ensure_uint8(middle_stack[idx])
-                yield _EdgeFrame(
-                    idx,
-                    _ensure_uint8(upper_processed),
-                    _ensure_uint8(lower_processed),
-                    int(middle_raw.shape[0]),
-                    partial(raw_frame, idx, middle_raw),
-                )
-
-        return frames(), total_frames
-
-    def _accumulate_primary(
-        self,
-        frames: Iterable[_EdgeFrame],
-        total_frames: int,
+        frames: PreprocessedFrames,
         *,
         edge_params: Dict[str, Any],
         save_overlays: bool,
@@ -354,24 +243,26 @@ class EdgeDetector:
         progress: bool,
         debug_root: Optional[Path],
     ) -> Dict[str, Any]:
-        """Detect edge damage in both halves of every frame and latch the masks."""
-        overlay_dir = self.owner.specimen.results_dir(overlay_dirname, "edge", "overlays") if save_overlays else None
+        """Detect edge damage in both edge parts of every frame and latch the masks."""
+        layout = self.owner.layout
+        raw_stack = getattr(self.owner.specimen, "image_stack_full", None)
+        overlay_dir = layout_io.overlay_dir(self.owner.specimen, overlay_dirname, "edge") if save_overlays else None
         primary_masks: Dict[str, np.ndarray] = {}
         debug_payloads: Optional[Dict[str, Any]] = {} if debug else None
         upper_state: Optional[np.ndarray] = None
         lower_state: Optional[np.ndarray] = None
-        progress_log = _Progress("edge_primary", total_frames, progress)
+        progress_log = _Progress("edge_primary", len(frames), progress)
 
-        for frame in frames:
-            idx = frame.idx
-            lower_flipped = np.flipud(frame.lower)
+        for idx, processed in frames:
+            upper, lower, gap = layout.edge_halves(processed)
+            lower_flipped = np.flipud(lower)
             upper_result, lower_result = self._process_halves(
-                frame.upper, lower_flipped, upper_state, lower_state, edge_params
+                upper, lower_flipped, upper_state, lower_state, edge_params
             )
             upper_state = upper_result["primary_latched"]
             lower_state = lower_result["primary_latched"]
 
-            primary_full = _assemble_full_mask(upper_state, lower_state, frame.middle_height)
+            primary_full = RegionLayout.join_edge_masks(upper_state, lower_state, gap)
             frame_key = f"frame_{idx:04d}"
             primary_masks[frame_key] = primary_full
 
@@ -379,17 +270,14 @@ class EdgeDetector:
                 progress_log.update(idx + 1)
                 continue
 
+            raw_frame = _ensure_uint8(raw_stack[idx]) if raw_stack is not None else processed
             processed_full = None
             if debug_root is not None or debug_payloads is not None:
-                middle_gap = np.zeros((frame.middle_height, frame.upper.shape[1]), dtype=frame.upper.dtype)
-                processed_full = np.vstack([frame.upper, middle_gap, frame.lower])
+                processed_full = np.vstack([upper, np.zeros((gap, upper.shape[1]), dtype=upper.dtype), lower])
 
             if overlay_dir is not None:
                 _save_edge_overlay(
-                    frame.raw_frame(primary_full.shape[:2]),
-                    primary_full,
-                    overlay_dir / f"edge_overlay_{idx:04d}.png",
-                    view=overlay_view,
+                    raw_frame, primary_full, overlay_dir / layout_io.overlay_name("edge", idx), view=overlay_view
                 )
 
             if debug_root is not None:
@@ -397,9 +285,9 @@ class EdgeDetector:
                 frame_dir.mkdir(parents=True, exist_ok=True)
                 _save_edge_debug_frame(
                     frame_dir=frame_dir,
-                    raw_frame=frame.raw_frame(primary_full.shape[:2]),
+                    raw_frame=raw_frame,
                     processed=processed_full,
-                    upper_slice=frame.upper,
+                    upper_slice=upper,
                     lower_slice=lower_flipped,
                     upper_result=upper_result,
                     lower_result=lower_result,
@@ -465,6 +353,9 @@ class EdgeDetector:
         ----------
         interfaces:
             Interfaces from the shallowest to the deepest.
+
+            Only full-frame specimens are supported; in region mode this
+            raises ``ValueError``.
         processed_cache_paths, processed_stack:
             Preprocessed frames for the first interface. If neither is given,
             the full stack is preprocessed with a rolling median reference.
@@ -484,7 +375,7 @@ class EdgeDetector:
         masks_dirname:
             Folder for the mask files.
         max_frames:
-            Process only the first ``max_frames`` frames.
+            Process only the first ``max_frames`` frames (at least 1).
         primary_params:
             Edge parameters for the first interface (``window_edge``,
             ``hard_floor``, ``seed_ratio``, ...).
@@ -512,35 +403,31 @@ class EdgeDetector:
             pixel), ``paths`` and ``params``, plus ``inclusive_masks``,
             ``exclusive_masks`` and ``debug`` when requested.
         """
-        if processed_cache_paths and processed_stack:
-            raise ValueError("Provide either processed_cache_paths or processed_stack, not both.")
-
-        primary_params = {**(params or {}), **(primary_params or {})}
-        if processed_cache_paths is None and processed_stack is None:
-            auto_stack = getattr(self.owner.specimen, "image_stack_full", None)
-            if auto_stack is None:
-                raise ValueError(
-                    "detect_edge_multi: no full image stack available for automatic "
-                    "preprocessing. Provide processed_cache_paths or processed_stack."
-                )
-            interface_token = _result_key_token(interfaces[0].name if interfaces else "i0")
-            processed_cache_paths = self.owner.preprocess_stack_to_disk(
-                auto_stack,
-                key=f"edge_multi_auto_{interface_token}",
-                max_frames=max_frames,
-                cache_dirname="Preprocessor_cache",
-                reference_mode="rolling_median",
-                reference_window=int(primary_params.get("reference_window", 10)),
-                reference_skip=int(primary_params.get("reference_skip", 1)),
-            )["cache_paths"]
-
+        if self.owner.layout.region_mode:
+            raise ValueError(
+                "detect_edge_multi works on full frames only; create the specimen without "
+                "path_upper_border, path_middle and path_lower_border to use it."
+            )
         interface_list = list(interfaces)
         if not interface_list:
             raise ValueError("detect_edge_multi requires at least one interface.")
-
         raw_stack = getattr(self.owner.specimen, "image_stack_full", None)
         if save_overlays and raw_stack is None:
             raise ValueError("Cannot save overlays without a full raw image stack.")
+
+        primary_params = {**(params or {}), **(primary_params or {})}
+        frames = resolve_frames(
+            self.owner,
+            processed_cache_paths=processed_cache_paths,
+            processed_stack=processed_stack,
+            max_frames=max_frames,
+            auto_key="edge_multi_auto",
+            reference={
+                "reference_mode": "rolling_median",
+                "reference_window": int(primary_params.get("reference_window", 10)),
+                "reference_skip": int(primary_params.get("reference_skip", 1)),
+            },
+        )
 
         edge_params = self._resolve_primary_params(primary_params)
         multi_params = self._resolve_multi_params({**(params or {}), **(secondary_params or {})})
@@ -551,13 +438,8 @@ class EdgeDetector:
             if secondary_cache_paths is not None
             else None
         )
-
-        if processed_stack is not None:
-            processed_iter: Iterable[Tuple[int, np.ndarray]] = enumerate(processed_stack)
-        else:
-            processed_iter = self.owner.iter_preprocessed_cache(processed_cache_paths)
         secondary_iter = (
-            self.owner.iter_preprocessed_cache(secondary_cache_paths) if secondary_cache_paths is not None else None
+            iter(PreprocessedFrames.from_cache(secondary_cache_paths)) if secondary_cache_paths is not None else None
         )
         keep_debug = debug_dir is not None
 
@@ -573,15 +455,13 @@ class EdgeDetector:
         debug_sec_processed: List[np.ndarray] = []
         debug_sec_results: Dict[str, List[Dict[str, Any]]] = {side: [] for side in _SIDES}
 
-        for idx, processed in processed_iter:
-            if max_frames is not None and len(frame_indices) >= max(0, int(max_frames)):
-                break
-
+        for idx, processed in frames:
             processed_uint8 = _ensure_uint8(processed)
-            split_row = processed_uint8.shape[0] // 2
+            upper, lower, _ = self.owner.layout.edge_halves(processed_uint8)
+            split_row = upper.shape[0]
             results = dict(zip(_SIDES, self._process_halves(
-                processed_uint8[:split_row, :],
-                np.flipud(processed_uint8[split_row:, :]),
+                upper,
+                np.flipud(lower),
                 primary_state["upper"],
                 primary_state["lower"],
                 edge_params,
@@ -677,7 +557,7 @@ class EdgeDetector:
             frame_key = f"frame_{frame_idx:04d}"
             frame_level: Optional[np.ndarray] = None
             for level, key in enumerate(result_keys, start=1):
-                full_mask = _assemble_full_mask(
+                full_mask = RegionLayout.join_edge_masks(
                     levels["upper"][level - 1][frame_pos], levels["lower"][level - 1][frame_pos]
                 )
                 inclusive_masks[key][frame_key] = full_mask
@@ -692,7 +572,7 @@ class EdgeDetector:
         paths: Dict[str, Any] = {"inclusive_masks": {}, "exclusive_masks": {}, "overlays": None}
 
         if save_masks:
-            masks_root = self.owner.specimen.results_dir(overlay_dirname, "edge_multi", masks_dirname)
+            masks_root = layout_io.multi_masks_dir(self.owner.specimen, overlay_dirname, masks_dirname)
             for key, interface in zip(result_keys, interface_list):
                 inclusive_path = save_mask_bundle(inclusive_masks[key], masks_root / f"{key}_inclusive.npz")
                 exclusive_path = save_mask_bundle(exclusive_masks[key], masks_root / f"{key}_exclusive.npz")
@@ -702,7 +582,7 @@ class EdgeDetector:
 
         labels = [_interface_legend_label(self.owner.specimen, interface) for interface in interface_list]
         if save_overlays:
-            overlay_dir = self.owner.specimen.results_dir(overlay_dirname, "edge_multi", "overlays")
+            overlay_dir = layout_io.overlay_dir(self.owner.specimen, overlay_dirname, "edge_multi")
             for frame_idx in frame_indices:
                 frame_key = f"frame_{frame_idx:04d}"
                 _save_multi_level_overlay(
@@ -710,7 +590,7 @@ class EdgeDetector:
                     level_masks=[exclusive_masks[key][frame_key] for key in result_keys],
                     labels=labels,
                     colors=display_colors,
-                    save_path=overlay_dir / f"edge_multi_overlay_{frame_idx:04d}.png",
+                    save_path=overlay_dir / layout_io.overlay_name("edge_multi", frame_idx),
                 )
             paths["overlays"] = str(overlay_dir)
 
@@ -785,16 +665,7 @@ class EdgeDetector:
     @staticmethod
     def _build_interface_result_keys(interfaces: Sequence[Interface]) -> List[str]:
         """Unique, file-safe keys for the interfaces, based on their names."""
-        seen: Dict[str, int] = {}
-        keys: List[str] = []
-        for idx, interface in enumerate(interfaces):
-            raw_base = str(interface.name).strip() or f"interface_{idx + 1}"
-            base = "".join(ch if (ch.isalnum() or ch in {"-", "_"}) else "_" for ch in raw_base)
-            base = base.strip("_") or f"interface_{idx + 1}"
-            count = seen.get(base, 0)
-            seen[base] = count + 1
-            keys.append(base if count == 0 else f"{base}_{count + 1}")
-        return keys
+        return layout_io.unique_names([interface.name for interface in interfaces])
 
     def _resolve_primary_params(self, params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Fill in the default edge parameters and check the given ones.

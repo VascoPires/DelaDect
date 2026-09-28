@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import warnings
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -19,7 +18,7 @@ PROGRESS_MILESTONES: Tuple[int, ...] = (25, 50, 75, 90)
 
 
 def _result_key_token(value: Any) -> str:
-    """Turn a name into a safe folder name."""
+    """Turn an interface name into a safe folder name."""
     return sanitize_path_token(value, fallback="interface")
 
 
@@ -188,89 +187,6 @@ def _resolve_pos_scale(value: Any) -> Optional[float]:
     return None if value is None else max(0.0, float(value))
 
 
-def _fetch_region_override_stacks(
-    owner: Any,
-    *,
-    domain: str,
-    max_frames: Optional[int],
-    extra_frame_counts: Optional[Dict[str, int]] = None,
-) -> Tuple[Sequence[np.ndarray], Sequence[np.ndarray], Sequence[np.ndarray], Optional[Sequence[np.ndarray]], int]:
-    """Return the upper, middle, lower and full stacks and the number of frames to process.
-
-    All stacks (and ``extra_frame_counts``, e.g. the crack frames) must
-    have the same number of frames; ``max_frames`` caps it.
-    """
-    stacks = owner._select_stacks()
-    upper_stack = stacks.get("upper")
-    middle_stack = stacks.get("middle")
-    lower_stack = stacks.get("lower")
-    raw_stack = getattr(owner.specimen, "image_stack_full", None)
-
-    if upper_stack is None or middle_stack is None or lower_stack is None:
-        raise ValueError("Region override mode requires upper/middle/lower stacks to be available.")
-
-    counts = {"upper": len(upper_stack), "middle": len(middle_stack), "lower": len(lower_stack)}
-    if extra_frame_counts:
-        counts.update(extra_frame_counts)
-    total_frames = _require_equal_frame_counts(counts)
-    if max_frames is not None:
-        total_frames = min(total_frames, max(0, int(max_frames)))
-    if total_frames <= 0:
-        raise ValueError(f"No frames available for region-overridden {domain} detection.")
-
-    return upper_stack, middle_stack, lower_stack, raw_stack, total_frames
-
-
-def _region_override_raw_frame(
-    raw_stack: Optional[Sequence[np.ndarray]],
-    idx: int,
-    target_shape: Tuple[int, int],
-    upper_frame: np.ndarray,
-    middle_frame: np.ndarray,
-    lower_frame: np.ndarray,
-) -> np.ndarray:
-    """Full frame ``idx`` for display, or the three region frames stacked if its shape doesn't match."""
-    if raw_stack is not None and idx < len(raw_stack):
-        raw_candidate = _ensure_uint8(raw_stack[idx])
-        if raw_candidate.shape[:2] == target_shape:
-            return raw_candidate
-    return np.vstack([_ensure_uint8(upper_frame), _ensure_uint8(middle_frame), _ensure_uint8(lower_frame)])
-
-
-def _auto_preprocess_cache_paths(
-    owner: Any,
-    *,
-    save_overlays: bool,
-    max_frames: Optional[int],
-    progress: bool,
-    key_prefix: str,
-    reference_mode: str = "static",
-) -> List[Path]:
-    """Preprocess the full stack when the caller passed no processed frames.
-
-    Preprocess previews are saved whenever overlays are requested.
-    """
-    stack = getattr(owner.specimen, "image_stack_full", None)
-    if stack is None:
-        raise ValueError("Specimen has no full image stack to preprocess.")
-    restore_preprocess_outputs = None
-    if save_overlays and not owner.save_preprocess_outputs:
-        restore_preprocess_outputs = owner.save_preprocess_outputs
-        owner.save_preprocess_outputs = True
-    try:
-        return owner.preprocess_stack_to_disk(
-            stack,
-            key=f"{key_prefix}_{_result_key_token(owner.interface.name)}",
-            max_frames=max_frames,
-            cache_dirname="Preprocessor_cache",
-            reference_mode=reference_mode,
-            progress=progress,
-        )["cache_paths"]
-    finally:
-        if restore_preprocess_outputs is not None:
-            owner.save_preprocess_outputs = restore_preprocess_outputs
-
-
 def _crack_input_frame_count(cracks: Any) -> int:
     """Number of frames in the crack input (a list, an array or a :func:`crack_analysis` result)."""
     if isinstance(cracks, Mapping):
@@ -314,19 +230,6 @@ def _crack_input_frame_count(cracks: Any) -> int:
             "cracks must be a per-frame sequence, NumPy array, or "
             "orientation-keyed crack_analysis result."
         ) from exc
-
-
-def _require_equal_frame_counts(counts: Dict[str, int]) -> int:
-    """Return the frame count shared by all inputs, or raise naming the ones that differ."""
-    unique_counts = set(counts.values())
-    if len(unique_counts) > 1:
-        details = ", ".join(f"{name}={count}" for name, count in counts.items())
-        raise ValueError(
-            f"Frame count mismatch between inputs: {details}. Refusing to silently "
-            "truncate to the shortest input; verify that all regions/crack input "
-            "were produced from the same set of frames."
-        )
-    return next(iter(unique_counts))
 
 
 def _coerce_cracks_by_frame(cracks: Any, frame_count: int) -> List[Any]:
@@ -379,3 +282,21 @@ def _coerce_cracks_by_frame(cracks: Any, frame_count: int) -> List[Any]:
             "delamination detection were run on the same set of frames."
         )
     return frame_cracks
+
+
+def _cracks_by_frame(cracks: Any, frame_count: int, max_frames: Optional[int] = None) -> List[Any]:
+    """Crack input as one entry per frame, cut to ``max_frames``.
+
+    Raises if the result doesn't have ``frame_count`` entries: crack and
+    delamination detection must run on the same frames.
+    """
+    frames = _coerce_cracks_by_frame(cracks, _crack_input_frame_count(cracks))
+    if max_frames is not None:
+        frames = frames[:max_frames]
+    if len(frames) != frame_count:
+        raise ValueError(
+            f"Crack input has {len(frames)} frame(s) but the image stack has {frame_count}. "
+            "Crack and delamination detection must run on the same frames; use max_frames "
+            "to process only the first frames of both."
+        )
+    return frames

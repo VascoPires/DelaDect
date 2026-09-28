@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/source/deladect_logo_white.svg" alt="DelaDect logo" width="600">
+  <img src="https://raw.githubusercontent.com/VascoPires/DelaDect/main/docs/source/deladect_logo_white.svg" alt="DelaDect logo" width="600">
 </p>
 
 <h3 align="center">Quantitative crack and delamination detection for fiber-reinforced polymers</h3>
@@ -17,13 +17,13 @@
   <a href="#citing-deladect">
     <img src="https://img.shields.io/badge/DOI-pending-lightgrey?logo=doi" alt="Paper DOI (pending)">
   </a>
-  <a href="LICENSE">
+  <a href="https://github.com/VascoPires/DelaDect/blob/main/LICENSE">
     <img src="https://img.shields.io/github/license/VascoPires/DelaDect" alt="License">
   </a>
 </p>
 
 <p align="center">
-  <img src="docs/source/_static/sample5_sequence.gif" alt="DelaDect visualization" width="720">
+  <img src="https://raw.githubusercontent.com/VascoPires/DelaDect/main/docs/source/_static/sample5_sequence.gif" alt="DelaDect visualization" width="720">
 </p>
 
 DelaDect is a Python package for quantitative damage analysis in fiber-reinforced polymers. Out of the box it is able to perform crack and delamination detection based on image sequences.

@@ -5,5 +5,4 @@ dependencies:
   - python=3.10
   - pip
   - jupyterlab
-  - pip:
-      - -e .
+# DelaDect itself is installed by postBuild, after the repository is copied in.

@@ -10,18 +10,9 @@ import pandas as pd
 
 from deladect.specimen import Ply, Specimen
 from .bundles import load_npz_bundle, save_npz_bundle
+from .layout import crack_file_name, ply_dir as _ply_dir
 
 PLY_CRACK_RESULTS_KEY = "crack_results_path"
-
-
-def _sanitize_name(name: str) -> str:
-    """Turn a ply name into a single folder name."""
-    cleaned = "_".join(name.strip().split())
-    return cleaned.replace("/", "_").replace("\\", "_").replace(":", "_") or "ply"
-
-
-def _ply_dir(specimen: Specimen, ply: Ply, *parts: str, results_root: Optional[str] = None) -> Path:
-    return specimen.results_dir("cracks", f"ply_{_sanitize_name(ply.name)}", *parts, results_root=results_root)
 
 
 def crack_results_dir(specimen: Specimen, ply: Ply, *, results_root: Optional[str] = None) -> Path:
@@ -129,7 +120,7 @@ def save_cracks(
 ) -> Path:
     """Save one crack array per frame to ``.npz`` and record the file in ``ply.metadata``."""
     target = _ply_dir(specimen, ply, folder_name or "data", results_root=results_root)
-    resolved = (file_name or f"{specimen.name}_{_sanitize_name(ply.name)}_cracks.npz").lstrip("_-")
+    resolved = (file_name or crack_file_name(specimen, ply)).lstrip("_-")
     if Path(resolved).suffix == "":
         resolved = f"{resolved}.npz"
     payload = {f"frame_{idx:04d}": np.asarray(crack, dtype=np.float32) for idx, crack in enumerate(cracks)}

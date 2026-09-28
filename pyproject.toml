@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deladect"
-version = "1.0.1"
+version = "1.1.0"
 description = "Crack and delamination detection for translucent fiber-reinforced composites."
 readme = "README.md"
 license = "AGPL-3.0-only"
 authors = [{ name = "Vasco D.C. Pires" }]
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 # numpy/scipy/scikit-image/pandas capped below 2.x because crackdect 0.2 imports
 # numpy.lib.utils.deprecate_with_doc, which numpy 2.0 removed.
 dependencies = [
@@ -21,6 +21,13 @@ dependencies = [
     "Pillow>=8.4.0",
     "crackdect>=0.2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/VascoPires/DelaDect"
+Documentation = "https://deladect.readthedocs.io"
+Source = "https://github.com/VascoPires/DelaDect"
+Issues = "https://github.com/VascoPires/DelaDect/issues"
+"Live notebooks" = "https://mybinder.org/v2/gh/VascoPires/DelaDect/HEAD"
 
 [project.optional-dependencies]
 dev = [

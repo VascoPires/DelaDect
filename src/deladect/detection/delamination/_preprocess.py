@@ -116,28 +116,6 @@ def _extract_preprocess_frame_metadata(payload: Any, frame_idx: int) -> Dict[str
     return meta
 
 
-def _reference_settings_from_cache_paths(processed_cache_paths: Optional[Sequence[Path]]) -> Dict[str, Any]:
-    """Reference settings a cache was built with, read from its first frame (defaults if unreadable)."""
-    settings: Dict[str, Any] = {"reference_mode": "static", "reference_window": 10, "reference_skip": 0}
-    if not processed_cache_paths:
-        return settings
-
-    first_path = Path(processed_cache_paths[0])
-    if not first_path.exists():
-        return settings
-    try:
-        with np.load(first_path, allow_pickle=False) as payload:
-            meta = _extract_preprocess_frame_metadata(payload, 0)
-    except Exception:
-        return settings
-
-    return {
-        "reference_mode": str(meta["reference_mode"]),
-        "reference_window": max(1, int(meta["reference_window"])),
-        "reference_skip": max(0, int(meta["reference_skip"])),
-    }
-
-
 class _ReferenceBaseline:
     """Normalization baseline for each frame of a stack, in order.
 
@@ -313,7 +291,7 @@ class PreprocessingMixin:
         key:
             Cache name; frames go to ``<results>/<cache_dirname>/<key>/``.
         max_frames:
-            Process only the first ``max_frames`` frames.
+            Process only the first ``max_frames`` frames (at least 1).
         history_mode:
             ``"running"`` (all previous frames) or ``"rolling"`` minimum history.
         history_window_size:
@@ -343,13 +321,47 @@ class PreprocessingMixin:
         dict[str, Any]
             ``{"cache_paths": list[pathlib.Path]}``, one file per frame.
         """
+        cache_paths = self._preprocess_to_disk(
+            stack,
+            key=key,
+            max_frames=max_frames,
+            history_mode=history_mode,
+            history_window_size=history_window_size,
+            reference_mode=reference_mode,
+            reference_window=reference_window,
+            reference_skip=reference_skip,
+            cache_dirname=cache_dirname,
+            progress=progress,
+            save_previews=self.save_preprocess_outputs,
+        )
+        return {"cache_paths": cache_paths}
+
+    def _preprocess_to_disk(
+        self,
+        stack: Optional[Iterable[np.ndarray]],
+        *,
+        key: str,
+        max_frames: Optional[int] = None,
+        history_mode: str = "running",
+        history_window_size: Optional[int] = None,
+        reference_mode: str = "static",
+        reference_window: int = 10,
+        reference_skip: int = 0,
+        cache_dirname: str = "Preprocessor_cache",
+        progress: bool = False,
+        save_previews: bool = False,
+    ) -> List[Path]:
+        """:meth:`preprocess_stack_to_disk` with previews switched by ``save_previews``; returns the cache paths."""
+        from ._frames import check_max_frames
+
         if stack is None:
             raise ValueError("A valid image stack is required for preprocessing.")
         if history_mode not in {"running", "rolling"}:
             raise ValueError("history_mode must be 'running' or 'rolling'.")
+        max_frames = check_max_frames(max_frames)
 
         cache_dir = self.specimen.results_dir(cache_dirname, key)
-        previews = _PreviewWriter(self._resolve_preprocess_output_dir(key), reference_mode)
+        previews = _PreviewWriter(self._preview_dir(key) if save_previews else None, reference_mode)
 
         if hasattr(stack, "__len__") and hasattr(stack, "__getitem__"):
             frames = cast(Sequence[np.ndarray], stack)
@@ -418,30 +430,22 @@ class PreprocessingMixin:
         }
         (cache_dir / PREPROCESS_MANIFEST_FILENAME).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         progress_log.done()
-        return {"cache_paths": cache_paths}
+        return cache_paths
 
     def iter_preprocessed_cache(self, cache_paths: List[Path]) -> Iterator[Tuple[int, np.ndarray]]:
         """Yield ``(index, processed_frame)`` for each cached frame."""
-        for idx, path in enumerate(cache_paths):
-            with np.load(path, allow_pickle=False) as payload:
-                processed = payload["processed"]
-            yield idx, processed
+        from ._frames import PreprocessedFrames
+
+        return iter(PreprocessedFrames.from_cache(cache_paths))
 
     def iter_preprocessed_cache_with_metadata(
         self, cache_paths: List[Path]
     ) -> Iterator[Tuple[int, np.ndarray, Dict[str, Any]]]:
         """Yield ``(index, processed_frame, reference_metadata)`` for each cached frame."""
-        for idx, path in enumerate(cache_paths):
-            with np.load(path, allow_pickle=False) as payload:
-                processed = payload["processed"]
-                metadata = _extract_preprocess_frame_metadata(payload, idx)
-            yield idx, processed, metadata
+        from ._frames import PreprocessedFrames
 
-    def _resolve_preprocess_output_dir(self, output_key: Optional[str]) -> Optional[Path]:
-        """Folder for preprocess previews, or ``None`` when previews are off."""
-        if not self.save_preprocess_outputs:
-            return None
-        parts = [self.preprocess_outputs_dirname]
-        if output_key:
-            parts.append(str(output_key))
-        return self.specimen.results_dir(*parts)
+        return PreprocessedFrames.from_cache(cache_paths).with_metadata()
+
+    def _preview_dir(self, key: str) -> Path:
+        """Folder for the preprocess previews of cache ``key``."""
+        return self.specimen.results_dir(self.preprocess_outputs_dirname, str(key))

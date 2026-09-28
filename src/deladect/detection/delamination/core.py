@@ -14,17 +14,16 @@ from deladect.io.delamination import (
     save_interface_metrics,
     save_mask_bundle,
     store_interface_delamination_results,
+    store_interface_masks,
 )
+from deladect.io import layout as layout_io
 from deladect.specimen import Interface, Specimen
 
 from ._common import (
     CrackInput,
     _Progress,
-    _auto_preprocess_cache_paths,
-    _coerce_cracks_by_frame,
+    _cracks_by_frame,
     _ensure_uint8,
-    _kmeans_split,
-    _minmax_otsu_threshold,
 )
 from ._overlays import (
     DIFFUSE_OVERLAY_RGBA,
@@ -34,17 +33,13 @@ from ._overlays import (
     _save_edge_overlay,
     _save_single_overlay,
 )
+from ._frames import PreprocessedFrames, resolve_frames
 from ._preprocess import PreprocessingMixin
+from ._regions import RegionLayout
 from .diffuse import DiffuseDetector
 from .edge import EdgeDetector
 
-# overlay_type -> (results subfolder, file prefix)
-_OVERLAY_OUTPUTS = {
-    "edge": ("edge", "edge_overlay"),
-    "diffuse": ("diffuse", "diffuse_overlay"),
-    "both": ("both", "combined_overlay"),
-    "total_dela": ("total", "total_overlay"),
-}
+_SAVED_OVERLAY_TYPES = ("edge", "diffuse", "both", "total_dela")
 
 
 def _dilate_edge_mask(edge_mask: np.ndarray, radius_px: int) -> np.ndarray:
@@ -132,10 +127,7 @@ class DelaminationDetector(PreprocessingMixin):
         self.history_clamp = bool(history_clamp)
         self.save_preprocess_outputs = bool(save_preprocess_outputs)
         self.preprocess_outputs_dirname = str(preprocess_outputs_dirname)
-        self._region_mode = all(
-            path is not None
-            for path in (specimen.path_upper_border, specimen.path_lower_border, specimen.path_middle)
-        )
+        self.layout = RegionLayout.from_specimen(specimen)
         self._notice_flags: Dict[str, bool] = {}
 
         self.edge = EdgeDetector(self)
@@ -175,7 +167,7 @@ class DelaminationDetector(PreprocessingMixin):
             ``{"path": pathlib.Path}`` of the saved image.
         """
         overlay_type = str(overlay_type).lower()
-        if overlay_type not in _OVERLAY_OUTPUTS:
+        if overlay_type not in _SAVED_OVERLAY_TYPES:
             raise ValueError("overlay_type must be one of: 'diffuse', 'edge', 'both', 'total_dela'.")
 
         raw_stack = getattr(self.specimen, "image_stack_full", None)
@@ -184,29 +176,33 @@ class DelaminationDetector(PreprocessingMixin):
 
         raw_frame = _ensure_uint8(raw_stack[frame_idx])
         frame_key = f"frame_{frame_idx:04d}"
-        masks_root = self.specimen.results_dir(overlay_dirname, "both", masks_dirname)
+        masks_root = layout_io.combined_masks_dir(self.specimen, overlay_dirname, masks_dirname)
 
-        edge_raw = _load_mask_frame(masks_root / "edge_raw.npz", frame_key)
+        def load(name: str) -> Optional[np.ndarray]:
+            return _load_mask_frame(masks_root / layout_io.COMBINED_MASK_FILES[name], frame_key)
+
+        edge_raw = load("edge_raw")
         if edge_raw is None:
             raise ValueError("Edge masks are missing. Run detect_both_delaminations with save_masks=True.")
 
-        edge_exclusion = _load_mask_frame(masks_root / "edge_exclusion.npz", frame_key)
+        edge_exclusion = load("edge_exclusion")
         if edge_exclusion is None:
             edge_exclusion = _dilate_edge_mask(edge_raw, max(0, int(edge_exclusion_px)))
 
-        diffuse_final = _load_mask_frame(masks_root / "diffuse_final.npz", frame_key)
+        diffuse_final = load("diffuse")
         if diffuse_final is None:
-            diffuse_final = _load_mask_frame(masks_root / "diffuse_raw.npz", frame_key)
+            diffuse_final = load("diffuse_raw")
         if overlay_type in {"diffuse", "both"} and diffuse_final is None:
             raise ValueError("Diffuse masks are missing. Run detect_both_delaminations with save_masks=True.")
 
-        combined = _load_mask_frame(masks_root / "combined.npz", frame_key)
+        combined = load("combined")
         if combined is None and diffuse_final is not None:
             combined = edge_exclusion | diffuse_final
 
         if save_path is None:
-            subfolder, prefix = _OVERLAY_OUTPUTS[overlay_type]
-            save_path = self.specimen.results_dir(overlay_dirname, subfolder, "overlays") / f"{prefix}_{frame_idx:04d}.png"
+            save_path = layout_io.overlay_dir(self.specimen, overlay_dirname, overlay_type) / layout_io.overlay_name(
+                overlay_type, frame_idx
+            )
 
         if overlay_type == "edge":
             _save_edge_overlay(raw_frame, edge_exclusion, save_path, view="mask")
@@ -271,12 +267,14 @@ class DelaminationDetector(PreprocessingMixin):
         cracks:
             Cracks per frame, or the result of
             :func:`~deladect.detection.crack_analysis` (all orientations are
-            used). Diffuse detection looks around these cracks.
+            used). Diffuse detection looks around these cracks. There must be
+            one entry per frame.
         processed_cache_paths, processed_stack:
             Preprocessed frames, as cache files or arrays. If neither is
             given, the full stack is preprocessed with
             ``reference_mode="static"``. Frames you pass should also use a
-            static reference.
+            static reference. In region mode the regions are cut from these
+            full frames.
         save_overlays:
             Save a combined overlay per frame.
         overlay_dirname:
@@ -291,7 +289,8 @@ class DelaminationDetector(PreprocessingMixin):
         edge_exclusion_px:
             Dilation of the edge mask before resolving the overlap.
         save_masks:
-            Save all masks to ``.npz``.
+            Save all masks to ``.npz`` and record the files on the interface
+            (the edge masks as its primary masks).
         masks_dirname:
             Folder for the mask files.
         save_metrics:
@@ -299,7 +298,8 @@ class DelaminationDetector(PreprocessingMixin):
         metrics_filename:
             Name of that CSV.
         max_frames:
-            Process only the first ``max_frames`` frames.
+            Process only the first ``max_frames`` frames (at least 1), of
+            both the images and the cracks.
         edge_params, diffuse_params:
             Parameter overrides for edge and diffuse detection.
         track_cracks:
@@ -321,8 +321,10 @@ class DelaminationDetector(PreprocessingMixin):
             Print progress.
         crack_coordinate_space:
             ``"middle"`` if the cracks were detected on the middle region
-            stack, ``"full"`` if on the full frames. Used to place the cracks
-            on overlays in region mode.
+            stack, ``"full"`` if on the full frames. Only used to place the
+            cracks on overlays in region mode. Detection in region mode needs
+            cracks from the middle region stack; if the last frame has cracks
+            outside the middle region, a ``ValueError`` is raised.
 
         Returns
         -------
@@ -333,65 +335,63 @@ class DelaminationDetector(PreprocessingMixin):
         """
         if cracks is None:
             raise ValueError("Diffuse delamination requires `cracks` to be provided.")
-        if processed_cache_paths and processed_stack:
-            raise ValueError("Provide either processed_cache_paths or processed_stack, not both.")
         if crack_coordinate_space not in {"middle", "full"}:
             raise ValueError("crack_coordinate_space must be one of: 'middle', 'full'.")
         if overlay_view not in {"union", "classified"}:
             raise ValueError("overlay_view must be one of: 'union', 'classified'.")
+        if edge_overlay_view not in {"mask", "line", "both"}:
+            raise ValueError("edge_overlay_view must be one of: 'mask', 'line', 'both'.")
 
         raw_stack = getattr(self.specimen, "image_stack_full", None)
-        if save_overlays and raw_stack is None:
+        if (save_overlays or save_component_overlays) and raw_stack is None:
             raise ValueError("Cannot save overlays without a full raw image stack.")
 
-        if processed_cache_paths is None and processed_stack is None:
-            processed_cache_paths = _auto_preprocess_cache_paths(
-                self, save_overlays=False, max_frames=max_frames, progress=progress, key_prefix="both_auto"
-            )
-
-        edge_result = self.edge.detect_primary(
+        frames = resolve_frames(
+            self,
             processed_cache_paths=processed_cache_paths,
             processed_stack=processed_stack,
+            max_frames=max_frames,
+            auto_key="both_auto",
+            progress=progress,
+        )
+        cracks_by_frame = _cracks_by_frame(cracks, len(frames), max_frames)
+        self.layout.check_cracks_in_middle(cracks_by_frame)
+
+        edge_result = self.edge._detect_primary(
+            frames,
+            edge_params=self.edge._resolve_primary_params(edge_params),
             save_overlays=save_component_overlays,
             overlay_dirname=overlay_dirname,
             overlay_view=edge_overlay_view,
-            max_frames=max_frames,
-            params=edge_params,
             debug=debug,
-            save_debug_outputs=save_edge_debug,
             progress=progress,
+            debug_root=self.specimen.results_dir("edge_accumulation_debug") if save_edge_debug else None,
         )
         edge_masks = edge_result["masks"]
 
+        resolved_diffuse = self.diffuse._resolve_diffuse_params(diffuse_params)
         crack_tracking_result: Optional[Dict[str, Any]] = None
         if track_cracks:
-            diffuse_masks, cracks_by_frame, crack_tracking_result, tracking_internals = self._tracked_diffuse_masks(
-                cracks=cracks,
-                processed_cache_paths=processed_cache_paths,
-                processed_stack=processed_stack,
-                max_frames=max_frames,
-                diffuse_params=diffuse_params,
+            diffuse_masks, crack_tracking_result, tracking_internals = self._tracked_diffuse_masks(
+                frames,
+                cracks_by_frame,
+                diffuse_params=resolved_diffuse,
                 max_center_px=max_center_px,
                 max_angle_deg=max_angle_deg,
                 max_cost=max_cost,
                 return_intermediates=return_intermediates,
             )
         else:
-            diffuse_masks = self.diffuse.diffuse_delamination(
-                cracks=cracks,
-                processed_cache_paths=processed_cache_paths,
-                processed_stack=processed_stack,
+            diffuse_masks = self.diffuse._detect(
+                frames,
+                cracks_by_frame,
+                params=resolved_diffuse,
                 save_overlays=False,
                 overlay_dirname=overlay_dirname,
-                max_frames=max_frames,
-                params=diffuse_params,
                 debug=debug,
                 progress=progress,
+                crack_coordinate_space=crack_coordinate_space,
             )["masks"]
-            cracks_by_frame = _coerce_cracks_by_frame(cracks, len(diffuse_masks))
-
-        if self._uses_stack_overrides():
-            self._clear_edge_region_rows(diffuse_masks)
 
         frame_keys = sorted(set(edge_masks) & set(diffuse_masks))
         if not frame_keys:
@@ -406,10 +406,10 @@ class DelaminationDetector(PreprocessingMixin):
         overlap_masks: Dict[str, np.ndarray] = {}
         metrics_rows: List[Dict[str, Any]] = []
 
-        combined_overlay_dir = self.specimen.results_dir(overlay_dirname, "both", "overlays") if save_overlays else None
+        combined_overlay_dir = layout_io.overlay_dir(self.specimen, overlay_dirname, "both") if save_overlays else None
         diffuse_overlay_dir = None
         if save_component_overlays and raw_stack is not None:
-            diffuse_overlay_dir = self.specimen.results_dir(overlay_dirname, "diffuse", "overlays")
+            diffuse_overlay_dir = layout_io.overlay_dir(self.specimen, overlay_dirname, "diffuse")
         progress_log = _Progress("combined_delamination", len(frame_keys), progress)
 
         for idx, frame_key in enumerate(frame_keys):
@@ -438,12 +438,12 @@ class DelaminationDetector(PreprocessingMixin):
 
             if diffuse_overlay_dir is not None or combined_overlay_dir is not None:
                 raw_frame = _ensure_uint8(raw_stack[frame_idx])
-                frame_cracks = self._overlay_cracks(cracks_by_frame, frame_idx, crack_coordinate_space)
+                frame_cracks = self.layout.cracks_for_display(cracks_by_frame[frame_idx], crack_coordinate_space)
             if diffuse_overlay_dir is not None:
                 _save_diffuse_overlay(
                     raw_frame,
                     diffuse_final,
-                    diffuse_overlay_dir / f"diffuse_overlay_{frame_idx:04d}.png",
+                    diffuse_overlay_dir / layout_io.overlay_name("diffuse", frame_idx),
                     cracks=frame_cracks,
                 )
             if combined_overlay_dir is not None:
@@ -451,7 +451,7 @@ class DelaminationDetector(PreprocessingMixin):
                     raw_frame,
                     edge_mask=edge_exclusion,
                     diffuse_mask=diffuse_final,
-                    save_path=combined_overlay_dir / f"combined_overlay_{frame_idx:04d}.png",
+                    save_path=combined_overlay_dir / layout_io.overlay_name("both", frame_idx),
                     view=overlay_view,
                     edge_color=EDGE_OVERLAY_RGBA,
                     diffuse_color=DIFFUSE_OVERLAY_RGBA,
@@ -475,23 +475,24 @@ class DelaminationDetector(PreprocessingMixin):
         }
 
         if save_masks:
-            masks_root = self.specimen.results_dir(overlay_dirname, "both", masks_dirname)
-            for path_key, masks, filename in (
-                ("edge_raw_masks", edge_masks, "edge_raw.npz"),
-                ("edge_exclusion_masks", edge_exclusion_masks, "edge_exclusion.npz"),
-                ("diffuse_raw_masks", diffuse_masks, "diffuse_raw.npz"),
-                ("diffuse_masks", diffuse_final_masks, "diffuse_final.npz"),
-                ("combined_masks", combined_masks, "combined.npz"),
+            masks_root = layout_io.combined_masks_dir(self.specimen, overlay_dirname, masks_dirname)
+            for name, masks in (
+                ("edge_raw", edge_masks),
+                ("edge_exclusion", edge_exclusion_masks),
+                ("diffuse_raw", diffuse_masks),
+                ("diffuse", diffuse_final_masks),
+                ("combined", combined_masks),
             ):
-                paths[path_key] = str(save_mask_bundle(masks, masks_root / filename))
+                paths[f"{name}_masks"] = str(save_mask_bundle(masks, masks_root / layout_io.COMBINED_MASK_FILES[name]))
 
         if save_metrics:
-            metrics_dir = self.specimen.results_dir(overlay_dirname, "both", "metrics")
+            metrics_dir = layout_io.combined_metrics_dir(self.specimen, overlay_dirname)
             paths["metrics"] = str(save_interface_metrics(metrics_df, metrics_dir / metrics_filename))
 
         def as_path(key: str) -> Optional[Path]:
             return Path(paths[key]) if paths[key] else None
 
+        store_interface_masks(self.interface, primary_path=as_path("edge_raw_masks"))
         store_interface_delamination_results(
             self.interface,
             diffuse_raw_path=as_path("diffuse_raw_masks"),
@@ -526,31 +527,24 @@ class DelaminationDetector(PreprocessingMixin):
 
     def _tracked_diffuse_masks(
         self,
+        frames: PreprocessedFrames,
+        cracks_by_frame: List[Any],
         *,
-        cracks: CrackInput,
-        processed_cache_paths: Optional[List[Path]],
-        processed_stack: Optional[List[np.ndarray]],
-        max_frames: Optional[int],
-        diffuse_params: Optional[Dict[str, Any]],
+        diffuse_params: Dict[str, Any],
         max_center_px: Optional[float],
         max_angle_deg: float,
         max_cost: float,
         return_intermediates: bool,
-    ) -> Tuple[Dict[str, np.ndarray], List[Any], Dict[str, Any], Dict[str, Any]]:
-        """Diffuse masks from crack tracking.
+    ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any], Dict[str, Any]]:
+        """Diffuse masks from crack tracking, on the diffuse rows of each frame.
 
-        Returns ``(masks, cracks per frame, tracking result, intermediates)``.
+        Returns ``(masks, tracking result, intermediates)``.
         """
         from deladect.detection.crack_tracking import normalize_detections
 
-        if processed_stack is not None:
-            proc_frames = list(processed_stack)[:max_frames] if max_frames else list(processed_stack)
-        else:
-            cache_paths = processed_cache_paths[:max_frames] if max_frames else processed_cache_paths
-            proc_frames = [frame for _, frame in self.iter_preprocessed_cache(cache_paths)]
+        rows = self.layout.diffuse_rows()
+        proc_frames = (frames if rows is None else frames.rows(*rows)).to_list()
         selected_indices = list(range(len(proc_frames)))
-
-        cracks_by_frame = _coerce_cracks_by_frame(cracks, len(proc_frames))
         crack_detections = [normalize_detections(cracks_by_frame[i]) for i in selected_indices]
 
         tracking = self.diffuse.diffuse_crack_tracking(
@@ -558,7 +552,7 @@ class DelaminationDetector(PreprocessingMixin):
             crack_detections,
             selected_indices,
             avg_crack_width_px=self.specimen.avg_crack_width_px,
-            diffuse_params=self.diffuse._resolve_diffuse_params(diffuse_params),
+            diffuse_params=diffuse_params,
             max_center_px=max_center_px,
             max_angle_deg=max_angle_deg,
             max_cost=max_cost,
@@ -566,7 +560,9 @@ class DelaminationDetector(PreprocessingMixin):
         )
         frame_shape = proc_frames[0].shape[:2] if proc_frames else (1, 1)
         masks = {
-            f"frame_{i:04d}": tracking["frame_masks"].get(i, np.zeros(frame_shape, dtype=bool))
+            f"frame_{i:04d}": self.layout.diffuse_to_full(
+                tracking["frame_masks"].get(i, np.zeros(frame_shape, dtype=bool))
+            )
             for i in selected_indices
         }
         internals = {
@@ -574,101 +570,4 @@ class DelaminationDetector(PreprocessingMixin):
             "selected_indices": selected_indices,
             "crack_frames_normalized": crack_detections,
         }
-        return masks, cracks_by_frame, tracking, internals
-
-    def _clear_edge_region_rows(self, diffuse_masks: Dict[str, np.ndarray]) -> None:
-        """Clear the upper and lower edge region rows of the diffuse masks (region mode)."""
-        stacks = self._select_stacks()
-        upper_stack, lower_stack = stacks.get("upper"), stacks.get("lower")
-        if upper_stack is None or lower_stack is None:
-            return
-        upper_height = np.asarray(upper_stack[0]).shape[0]
-        lower_height = np.asarray(lower_stack[0]).shape[0]
-        for frame_key, mask in diffuse_masks.items():
-            mask = mask.copy()
-            mask[:upper_height, :] = False
-            if lower_height > 0:
-                mask[-lower_height:, :] = False
-            diffuse_masks[frame_key] = mask
-
-    def _overlay_cracks(
-        self,
-        cracks_by_frame: Sequence[Any],
-        frame_idx: int,
-        crack_coordinate_space: str,
-    ) -> Optional[List[np.ndarray]]:
-        """Cracks of frame ``frame_idx`` in full-frame coordinates, for overlays."""
-        cracks = cracks_by_frame[frame_idx] if frame_idx < len(cracks_by_frame) else None
-        if not self._uses_stack_overrides():
-            return cracks
-        return self._cracks_for_full_overlay(
-            cracks,
-            shift=(crack_coordinate_space == "middle"),
-            upper_height=int(np.asarray(self.specimen.image_stack_upper[frame_idx]).shape[0]),
-        )
-
-    def _uses_stack_overrides(self) -> bool:
-        """``True`` when upper, lower and middle region stacks were all given."""
-        return self._region_mode
-
-    def _select_stacks(self) -> Dict[str, Optional[List[np.ndarray]]]:
-        """The region stacks in region mode, otherwise only the full stack."""
-        if self._uses_stack_overrides():
-            return {
-                "upper": getattr(self.specimen, "image_stack_upper", None),
-                "lower": getattr(self.specimen, "image_stack_lower", None),
-                "middle": getattr(self.specimen, "image_stack_middle", None),
-                "full": None,
-            }
-        return {
-            "upper": None,
-            "lower": None,
-            "middle": None,
-            "full": getattr(self.specimen, "image_stack_full", None),
-        }
-
-    @staticmethod
-    def _cracks_for_full_overlay(
-        cracks: Optional[Sequence[np.ndarray]],
-        *,
-        shift: bool,
-        upper_height: int,
-    ) -> Optional[List[np.ndarray]]:
-        """Crack segments as ``(n, 2)`` arrays, moved down by ``upper_height`` if ``shift``.
-
-        ``shift`` has to come from the caller: a middle-region crack near
-        ``y=0`` and a full-frame crack near the top have the same
-        coordinates.
-        """
-        if cracks is None:
-            return None
-
-        prepared: List[np.ndarray] = []
-        for segment in cracks:
-            try:
-                arr = np.asarray(segment, dtype=float).reshape(-1, 2)
-            except Exception:
-                continue
-            if arr.shape[0] >= 2:
-                prepared.append(arr)
-
-        if shift and upper_height > 0:
-            offset = np.array([float(upper_height), 0.0])
-            return [arr + offset for arr in prepared]
-        return prepared
-
-    def _images_threshold(self, image: np.ndarray, window_edge: Tuple[int, int]) -> float:
-        """Otsu threshold after a max and a min filter over ``window_edge``."""
-        return _minmax_otsu_threshold(image, window_edge)
-
-    def _kmeans_threshold(
-        self,
-        image: np.ndarray,
-        fallback: float,
-        *,
-        max_iter: int = 20,
-        tol: float = 1e-2,
-    ) -> float:
-        """Two-cluster k-means threshold of ``image``, or ``fallback`` if it can't be split."""
-        threshold = _kmeans_split(image, max_iter=max_iter, tol=tol)
-        return float(fallback) if threshold is None else threshold
+        return masks, tracking, internals

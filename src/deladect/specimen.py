@@ -35,30 +35,32 @@ Color = Tuple[float, float, float, float]
 
 logger = logging.getLogger(__name__)
 
-# Characters illegal in file/directory names on Windows, macOS or Linux.
-_ILLEGAL_PATH_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+# Anything but letters, digits and "._+-" is replaced in file and folder names.
+_UNSAFE_PATH_CHARS = re.compile(r"[^A-Za-z0-9._+-]")
 _WINDOWS_RESERVED_NAMES = {
     "CON", "PRN", "AUX", "NUL",
     *(f"COM{i}" for i in range(1, 10)),
     *(f"LPT{i}" for i in range(1, 10)),
 }
+_RENAMED_TOKENS: set = set()
 
 
 def sanitize_path_token(value: Any, *, fallback: str = "unnamed") -> str:
-    """Make a name safe as a folder name on any OS, e.g. ``"0/90"`` becomes ``"0_90"``."""
+    """Make a name safe as a file or folder name, e.g. ``"0/90"`` becomes ``"0_90"``.
+
+    Characters other than letters, digits, ``.``, ``_``, ``+`` and ``-``
+    are replaced by ``_``, and leading/trailing ``.`` and ``_`` are removed.
+    A warning is logged the first time a name is changed.
+    """
     original = str(value)
-    token = _ILLEGAL_PATH_CHARS.sub("_", original).strip(" .")
+    token = _UNSAFE_PATH_CHARS.sub("_", original.strip()).strip("._")
     if token.upper() in _WINDOWS_RESERVED_NAMES:
         token = f"{token}_"
     if not token:
         token = fallback
-    if token != original:
-        logger.warning(
-            "%r is not a safe file/directory name on Windows, macOS, or Linux; "
-            "using %r instead.",
-            original,
-            token,
-        )
+    if token != original and original not in _RENAMED_TOKENS:
+        _RENAMED_TOKENS.add(original)
+        logger.warning("Name %r is used as %r in file and folder names.", original, token)
     return token
 
 
@@ -181,7 +183,9 @@ class Specimen:
     path_upper_border, path_lower_border, path_middle:
         Optional folders with the same frames cropped to the upper edge,
         lower edge and middle. When all three are given, edge detection
-        uses the borders and crack/diffuse detection uses the middle.
+        uses the borders and crack/diffuse detection uses the middle. The
+        crops must stack exactly to the full frame, cut at the same rows in
+        every frame.
     avg_crack_width_px:
         Default crack width in pixels for plies that don't set their own.
     dimensions:
@@ -211,7 +215,8 @@ class Specimen:
     ------
     ValueError
         If ``stack_backend`` is unknown, no images are found, or the
-        region folders don't contain the same frames.
+        region folders don't contain the same frames or don't stack to the
+        full frames.
 
     Example
     -------
@@ -418,6 +423,43 @@ class Specimen:
                 self._load_region_stack(name, folder)
 
         self._validate_frame_alignment()
+        self._validate_region_shapes()
+
+    def _validate_region_shapes(self) -> None:
+        """Raise if the upper, middle and lower images don't stack to the full frame.
+
+        The region images must be exact crops of the full frames: same
+        width, and heights that add up to the full height, in every frame.
+        Only image headers are read.
+        """
+        if not (self.path_upper_list and self.path_middle_list and self.path_lower_list):
+            return
+        from PIL import Image
+
+        def size(path: str) -> Tuple[int, int]:
+            with Image.open(path) as image:
+                width, height = image.size
+            return height, width
+
+        first_heights = None
+        for frame, paths in enumerate(
+            zip(self.path_full_list, self.path_upper_list, self.path_middle_list, self.path_lower_list)
+        ):
+            (full_h, full_w), *regions = (size(path) for path in paths)
+            heights = tuple(height for height, _ in regions)
+            if any(width != full_w for _, width in regions) or sum(heights) != full_h:
+                raise ValueError(
+                    f"Frame {frame}: the upper, middle and lower images ({', '.join(f'{h}x{w}' for h, w in regions)}) "
+                    f"don't stack to the full frame ({full_h}x{full_w}). Region images must be exact "
+                    "crops of the full frames."
+                )
+            if first_heights is None:
+                first_heights = heights
+            elif heights != first_heights:
+                raise ValueError(
+                    f"Frame {frame}: region heights {heights} differ from frame 0 {first_heights}; "
+                    "every frame must be cut at the same rows."
+                )
 
     def _validate_frame_alignment(self) -> None:
         """Raise if the region stacks don't contain the same frames in the same order.
