@@ -72,6 +72,7 @@ You can access it at
 
    examples/getting_started
    examples/delamination_multi_interface
+   examples/synthetic_validation
 
 .. toctree::
    :maxdepth: 1
