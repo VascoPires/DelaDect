@@ -875,7 +875,34 @@ class Specimen:
         nf: Optional[int] = None,
         nstep: int = 1,
     ) -> pd.DataFrame:
-        """Load the ``strain_y`` column from a CSV or Excel file, keeping rows ``n0:nf:nstep``."""
+        """Load the ``strain_y`` column from a CSV or Excel file, keeping rows ``n0:nf:nstep``.
+
+        The result is stored in ``experimental_data`` and added to the
+        exported crack metrics.
+
+        Parameters
+        ----------
+        data_path:
+            ``.csv`` file, or any other path read as an Excel file.
+        sheet_name:
+            Excel sheet to read (ignored for CSV files).
+        n0:
+            First row to keep.
+        nf:
+            Last row to keep (inclusive); ``None`` keeps all rows to the end.
+        nstep:
+            Keep every ``nstep``-th row.
+
+        Returns
+        -------
+        pandas.DataFrame
+            The selected ``strain_y`` values, one column.
+
+        Raises
+        ------
+        ValueError
+            If the file has no ``strain_y`` column.
+        """
         if data_path.lower().endswith(".csv"):
             df = pd.read_csv(data_path)
         else:
@@ -885,7 +912,25 @@ class Specimen:
 
     @staticmethod
     def join_cracks(*crack_lists: List[np.ndarray]) -> List[np.ndarray]:
-        """Merge several per-frame crack lists into one, frame by frame."""
+        """Merge several per-frame crack lists into one, frame by frame.
+
+        Parameters
+        ----------
+        *crack_lists:
+            Crack lists with one array per frame, e.g. the cracks of
+            several plies. All must have the same number of frames.
+
+        Returns
+        -------
+        list[numpy.ndarray]
+            The stacked cracks of each frame; ``(0, 2, 2)`` arrays for
+            frames without cracks.
+
+        Raises
+        ------
+        ValueError
+            If the lists have different numbers of frames.
+        """
         if not crack_lists:
             return []
         frame_count = len(crack_lists[0])

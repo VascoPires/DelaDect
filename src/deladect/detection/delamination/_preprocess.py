@@ -299,7 +299,7 @@ class PreprocessingMixin:
         reference_mode:
             ``"static"`` divides every frame by one early frame. Use it for
             :meth:`~EdgeDetector.detect_primary`,
-            :meth:`~DiffuseDetector.diffuse_delamination` and
+            :meth:`~DiffuseDetector.detect_diffuse` and
             :meth:`detect_both_delaminations`.
 
             ``"rolling_median"`` divides by the median of recent frames, so

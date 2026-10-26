@@ -2,7 +2,7 @@ Delamination Detection Methodology
 ==================================
 
 Edge and diffuse delamination are both reached through a single
-:class:`~deladect.detection.delamination.DelaminationDetector` per
+:class:`~deladect.detection.DelaminationDetector` per
 ``(specimen, interface)`` pair. Then two other detectors are available inside
 the same object, for the two delamination modes:
 ``detector.edge`` and
@@ -83,7 +83,7 @@ methodology, applied per frame:
 Combining the two
 ------------------
 
-:meth:`~deladect.detection.delamination.DelaminationDetector.detect_both_delaminations`
+:meth:`~deladect.detection.DelaminationDetector.detect_both_delaminations`
 runs both pipelines together and resolves any overlap
 between the two modes favouring the edge delamination. This means that
 if diffuse and edge delamination is found in the same place, that region

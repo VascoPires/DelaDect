@@ -76,7 +76,7 @@ def _splat_mask(full_mask: np.ndarray, mask_bbox: np.ndarray, bounds: Bounds) ->
 class DiffuseDetector:
     """Diffuse delamination detection around cracks.
 
-    :meth:`diffuse_delamination` looks at each frame's cracks on their
+    :meth:`detect_diffuse` looks at each frame's cracks on their
     own; :meth:`diffuse_crack_tracking` follows the cracks over time.
     """
 
@@ -84,7 +84,7 @@ class DiffuseDetector:
         """Create a diffuse detector for the parent :class:`DelaminationDetector`."""
         self.owner = owner
 
-    def diffuse_delamination(
+    def detect_diffuse(
         self,
         *,
         cracks: Optional[CrackInput] = None,
@@ -195,7 +195,7 @@ class DiffuseDetector:
         diffuse_masks: Dict[str, np.ndarray] = {}
         debug_payloads = self._new_debug_payload(params) if debug else None
         latched: Optional[np.ndarray] = None
-        progress_log = _Progress("diffuse_delamination", len(frames), progress)
+        progress_log = _Progress("detect_diffuse", len(frames), progress)
 
         for idx, processed, frame_meta in search_frames.with_metadata():
             crack_idx, ref_start, ref_end = self._resolve_diffuse_crack_index(
@@ -712,8 +712,8 @@ class DiffuseDetector:
         processed_frames:
             Preprocessed frames, in the order of ``selected_indices``.
         crack_frames:
-            :class:`~deladect.detection.CrackDetection` lists per frame, from
-            :func:`~deladect.detection.normalize_detections`.
+            Crack detections of each frame (position, length, angle and
+            bounding box of every segment).
         selected_indices:
             Frame numbers of ``processed_frames``.
         avg_crack_width_px:
@@ -727,7 +727,7 @@ class DiffuseDetector:
         max_angle_deg:
             Largest angle difference for a crack match.
         max_cost:
-            Largest match cost, see :func:`~deladect.detection.match_tracks`.
+            Largest match cost of a track/detection pair.
         return_intermediates:
             Include the region images in each stats entry (uses a lot of
             memory).
@@ -735,7 +735,7 @@ class DiffuseDetector:
         Returns
         -------
         dict[str, Any]
-            ``tracks`` (all :class:`~deladect.detection.CrackTrack` objects),
+            ``tracks`` (every crack followed across the frames),
             ``events`` (new, matched and terminated tracks),
             ``vanishing_stats`` and ``diffuse_stats`` (one entry per region
             checked), ``frame_masks`` (``{frame: mask}``) and

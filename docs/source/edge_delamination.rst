@@ -5,10 +5,38 @@ Edge delamination is damage that remains connected to a specimen free edge.
 For this, the image is split into upper and lower specimen halves (or those regions
 are provided by the user) and each one is processed independently. 
 
+Running edge detection
+----------------------
+
+Edge detection needs a configured specimen and interface. It returns one
+full-frame mask per frame, combining the upper and lower edge regions.
+
+.. code-block:: python
+
+   from deladect.detection import DelaminationDetector
+
+   detector = DelaminationDetector(specimen, interface)
+
+   edge_result = detector.edge.detect_primary(
+       save_overlays=True,
+       params={
+           "window_edge": (1, 90),
+           "seed_ratio": 0.01,
+           "connectivity_mode": "directional",
+       },
+       progress=True,
+   )
+
+   edge_masks = edge_result["masks"]
+
+``window_edge`` is measured in pixels and should be matched to the image
+scale. ``seed_ratio`` is the fraction of each processed edge region's height
+used for the initial seed; ``0.01`` corresponds to 1%.
+
 Detection sequence
 ------------------
 
-For each frame, :meth:`deladect.detection.delamination.EdgeDetector.detect_primary`
+For each frame, :meth:`deladect.detection.EdgeDetector.detect_primary`
 applies filters, unsharp masking, directional Gaussian
 smoothing, constant scaling, thresholding, and morphological closing (see
 the workflow figure in :doc:`methodology`). After those operations the free edge

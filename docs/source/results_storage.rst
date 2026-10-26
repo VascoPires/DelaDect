@@ -1,123 +1,116 @@
-How to store results
-=====================
+# How to store results
 
-Overview
---------
-Everything DelaDect saves lives under a per-specimen results root.
+## Overview
 
-.. code-block:: text
+DelaDect stores the results for each specimen in a separate folder:
 
-   results/<specimen.name>/
+```text
+results/<specimen.name>/
+```
 
-(``results/`` by default, relative; override with ``specimen.results_root``.)
-Each call to ``results_dir(*parts)`` joins and creates subdirectories under
-that root; every part must be a single safe path component.
+By default, `results/` is a relative path, but it can be changed using `specimen.results_root`.
 
-Config
-------
-.. code-block:: text
+The `results_dir(*parts)` method can be used to create folders inside the specimen results directory. Each argument must be a single valid folder or file name, not a complete path.
 
-   results/<name>/config/<name>_config.json
+## Configuration
 
-``specimen.save_config()`` writes the manifest here (the path is also
-available as ``specimen.config_path()``, without saving). Mutations like
-``add_ply`` and ``add_interface`` are not persisted until you call it.
-``save_specimen(specimen, path)`` does the same thing at an arbitrary path
-of your choosing, as used in :doc:`examples/delamination_multi_interface`.
+The specimen configuration is saved in:
 
-Cracks
-------
-.. code-block:: text
+```text
+results/<name>/config/<name>_config.json
+```
 
-   results/<name>/cracks/ply_<sanitized_ply_name>/
-     data/       <specimen>_<sanitized_ply_name>_cracks.npz
-     metrics/    rho_data.csv, crack_spacing.csv
-     plots/      cracks_<label>.png   (per-frame overlays)
+Use `specimen.save_config()` to save the configuration. The path can also be obtained with `specimen.config_path()`, without saving anything.
 
-The NPZ file stores one array per frame, keyed ``frame_0000``,
-``frame_0001``, and so on. Its path is recorded back onto
-``ply.metadata["crack_results_path"]`` so it can be found again without
-re-deriving the folder name.
+Changes to the specimen, such as adding plies with `add_ply` or interfaces with `add_interface`, are only stored after saving the configuration again.
 
-Delamination masks
--------------------
-.. code-block:: text
+Alternatively, `save_specimen(specimen, path)` can be used to save the configuration to a specific location, as shown in the [multi-interface delamination example](examples/delamination_multi_interface.md).
 
-   results/<name>/<overlay_dirname>/<edge|diffuse|both|total>/<masks_dirname>/
-     edge_raw.npz
-     edge_exclusion.npz
-     diffuse_raw.npz
-     diffuse_final.npz
-     combined.npz
+## Crack detection
 
-   results/<name>/<overlay_dirname>/<edge|diffuse|both|total>/overlays/
-     edge_overlay_<idx:04d>.png
-     diffuse_overlay_<idx:04d>.png
-     combined_overlay_<idx:04d>.png
-     total_overlay_<idx:04d>.png
+Crack detection results are organized by ply:
 
-   results/<name>/<overlay_dirname>/both/metrics/
-     frame_metrics.csv
+```text
+results/<name>/cracks/ply_<sanitized_ply_name>/
+├── data/
+│   └── <specimen>_<sanitized_ply_name>_cracks.npz
+├── metrics/
+│   ├── rho_data.csv
+│   └── crack_spacing.csv
+└── plots/
+    └── cracks_<label>.png
+```
 
-Defaults: ``overlay_dirname="delamination"``, ``masks_dirname="masks"``.
-Every mask NPZ uses the same per-frame key convention: ``frame_<idx:04d>``.
+The `.npz` file contains the detected cracks for each frame, stored under keys such as `frame_0000`, `frame_0001`, and so on. The path to this file is also saved in `ply.metadata["crack_results_path"]`, so the results can be found again without having to reconstruct the folder path.
 
-The corresponding paths are written onto ``interface.metadata`` under these
-keys: ``primary_masks_path``, ``secondary_masks_path``,
-``diffuse_raw_masks_path``, ``diffuse_masks_path``, ``combined_masks_path``,
-``delamination_metrics_path``.
+The `metrics` folder contains the crack density and spacing data, while `plots` contains the crack overlays for the individual frames.
 
-Multi-interface edge progression uses the same pattern under
-``edge_multi/masks/``, with one ``<interface>_inclusive.npz`` and
-``<interface>_exclusive.npz`` pair per interface (see :doc:`methodology`).
+## Delamination detection
 
-Preprocessing cache
---------------------
-.. code-block:: text
+The delamination masks are stored according to the type of analysis:
 
-   results/<name>/<cache_dirname>/<key>/preprocess_%04d.npz
+```text
+results/<name>/<overlay_dirname>/<edge|diffuse|both|total>/
+├── <masks_dirname>/
+│   ├── edge_raw.npz
+│   ├── edge_exclusion.npz
+│   ├── diffuse_raw.npz
+│   ├── diffuse_final.npz
+│   └── combined.npz
+└── overlays/
+    ├── edge_overlay_<idx:04d>.png
+    ├── diffuse_overlay_<idx:04d>.png
+    ├── combined_overlay_<idx:04d>.png
+    └── total_overlay_<idx:04d>.png
 
-Default ``cache_dirname="Preprocessor_cache"``. See :doc:`Image_pre_processing`
-for what each cached frame contains and how ``key`` is chosen.
+results/<name>/<overlay_dirname>/both/metrics/
+└── frame_metrics.csv
+```
 
+By default, `overlay_dirname="delamination"` and `masks_dirname="masks"`. As with crack detection, each `.npz` file stores the masks per frame using the `frame_<idx:04d>` convention.
 
-Save, reload, and experimental data
-------------------------------------
+The paths to these files are also stored in `interface.metadata` under the following keys: `primary_masks_path`, `secondary_masks_path`, `diffuse_raw_masks_path`, `diffuse_masks_path`, `combined_masks_path`, and `delamination_metrics_path`.
 
-You can save a specimen manifest and later reload the specimen together with
-its stored crack and delamination results, to work on a previously analyzed
-specimen without re-running detection.
+For multi-interface edge delamination, the results follow a similar structure under `edge_multi/masks/`. Each interface has an `<interface>_inclusive.npz` and an `<interface>_exclusive.npz` file. More details are available in the [methodology](methodology.md).
 
-Pass ``save_specimen`` the path where the manifest should live, for example
-the ``manifest`` path built in :doc:`examples/delamination_multi_interface`:
+## Preprocessing cache
 
-.. code-block:: python
+Preprocessed images can also be cached to avoid repeating the same operations:
 
-   from deladect.io import save_specimen
+```text
+results/<name>/<cache_dirname>/<key>/preprocess_%04d.npz
+```
 
-   manifest = specimen.results_dir("config") / "specimen.json"
-   save_specimen(specimen, manifest)
+The default directory is `cache_dirname="Preprocessor_cache"`. The contents of each cached frame and the definition of `key` are explained in [Image preprocessing](Image_pre_processing.md).
 
-Reload the same ``manifest`` path later, in the same session or a fresh one,
-to get the specimen back together with everything under its results root:
+## Saving and reloading a specimen
 
-.. code-block:: python
+The specimen configuration and its stored results can be loaded again without repeating the crack and delamination detection. This is particularly useful when returning to a previously analysed specimen.
 
-   from deladect.io import load_specimen, load_stored_results
+First, save the specimen manifest at the desired location:
 
-   specimen = load_specimen(
-       manifest,
-       auto_init_stacks=False,
-       load_results=True,
-       verbose=True,
-       strict=True,
-   )
-   bundles = load_stored_results(specimen, strict=True, verbose=True)
+```python
+from deladect.io import save_specimen
 
-``strict=True`` fails fast when a metadata path points to a missing file,
-rather than silently skipping it.
+manifest = specimen.results_dir("config") / "specimen.json"
+save_specimen(specimen, manifest)
+```
 
-``strain_csv`` round-trips through the manifest like any other constructor
-argument, so ``specimen.experimental_data`` is populated again as soon as
-the specimen is reloaded. No separate step needed.
+The same manifest can then be used to reload the specimen, either in the same session or in a new one:
 
+```python
+from deladect.io import load_specimen, load_stored_results
+
+specimen = load_specimen(
+    manifest,
+    auto_init_stacks=False,
+    load_results=True,
+    verbose=True,
+    strict=True,
+)
+bundles = load_stored_results(specimen, strict=True, verbose=True)
+```
+
+Setting `strict=True` raises an error if a file referenced in the metadata cannot be found, instead of silently skipping it.
+
+If `strain_csv` was defined when creating the specimen, its path is also saved in the manifest. When the specimen is reloaded, `specimen.experimental_data` is populated automatically, without any additional steps.

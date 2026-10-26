@@ -74,6 +74,25 @@ Pixels below the threshold become the binary delamination candidate mask.
    :width: 760
    :align: center
 
+Thresholding produces candidate pixels, however before morphological closing, these
+candidates must also satisfy a minimum intensity criterion. The filtered intensity,
+before rescaling must not exceed ``hard_floor`` value (default 0.90, so the pixel 
+must be at least 10% darker than in the reference frame to pass this step). 
+This means that only "dark enough" pixels can be considered for the next stage, even
+if they would qualify for thresholding. This could prevent weak shadows or other artefacts
+from being considered as candidate damage. The schematic below
+illustrates how this procedure works. The floor rejects such pixels when they are not dark in absolute terms. 
+The schematic below illustrates the procedure. hard_floor can be changed by the user and a lower 
+value makes detection stricter.
+
+.. figure:: _static/image_operations/hard_floor_gate_redrawn.png
+   :alt: Intensity gate retaining darker candidates and rejecting candidates above the hard-floor cutoff
+   :width: 520
+   :align: center
+
+   Candidate pixels must satisfy both the clustering threshold and the
+   hard-floor criterion before morphological closing.
+
 Morphological closing
 ---------------------
 

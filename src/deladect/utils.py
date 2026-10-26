@@ -8,7 +8,19 @@ import numpy as np
 
 
 def crack_mid_point(crack: Sequence[Sequence[float]]) -> List[Optional[float]]:
-    """Midpoint ``[row, col]`` of a segment, or ``[None, None]`` if it isn't a 2x2 array."""
+    """Midpoint ``[row, col]`` of a segment, or ``[None, None]`` if it isn't a 2x2 array.
+
+    Parameters
+    ----------
+    crack:
+        Segment ``[[row0, col0], [row1, col1]]``.
+
+    Returns
+    -------
+    list[float | None]
+        ``[row, col]`` of the midpoint, or ``[None, None]`` for an empty
+        or malformed segment.
+    """
     crack_array = np.asarray(crack, dtype=float)
     if crack_array.shape != (2, 2):
         return [None, None]
@@ -16,7 +28,19 @@ def crack_mid_point(crack: Sequence[Sequence[float]]) -> List[Optional[float]]:
 
 
 def crack_length(crack: Sequence[Sequence[float]]) -> float:
-    """Length of a segment in pixels."""
+    """Length of a segment in pixels.
+
+    Parameters
+    ----------
+    crack:
+        Segment ``[[row0, col0], [row1, col1]]``.
+
+    Returns
+    -------
+    float
+        Euclidean length of the segment, or ``0.0`` if it is ``None`` or
+        doesn't have two end points.
+    """
     if crack is None or len(crack) != 2:
         return 0.0
     (row0, col0), (row1, col1) = crack

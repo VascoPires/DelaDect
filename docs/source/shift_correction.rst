@@ -187,7 +187,7 @@ tracked marker coordinates using :class:`scipy.interpolate.RBFInterpolator`
 with a thin-plate-spline kernel. In practise, based on the for marker positions
 :math:`\mathbf{x}_i^{(0)}` in the reference image and
 :math:`\mathbf{x}_i^{(n)}` in a later frame, the interpolator constructs a
-warp function:math:`T(\mathbf{x})` such that
+warp function :math:`T(\mathbf{x})` such that
 :math:`T(\mathbf{x}_i^{(0)}) \approx \mathbf{x}_i^{(n)}`. This transformation is shown
 below.
 

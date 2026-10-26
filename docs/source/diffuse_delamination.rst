@@ -28,7 +28,7 @@ full-frame mask per frame.
    cracks = crack_analysis(specimen, save_cracks=True)
    detector = DelaminationDetector(specimen, interface)
 
-   diffuse_result = detector.diffuse.diffuse_delamination(
+   diffuse_result = detector.diffuse.detect_diffuse(
        cracks=cracks,
        save_overlays=True,
        params={

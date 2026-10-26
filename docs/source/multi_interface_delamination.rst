@@ -37,7 +37,7 @@ an already established primary region.
    initial stages of the test. Therefore it comes to user judgement to
    decide if the results are valid or not. 
 
-:meth:`~deladect.detection.delamination.EdgeDetector.detect_edge_multi`
+:meth:`~deladect.detection.EdgeDetector.detect_edge_multi`
 extends the same primary edge algorithm from :doc:`edge_delamination` to an
 ordered interface list of any length. The first (primary) interface
 accumulates exactly as described on that page. The additional interfaces are
@@ -57,7 +57,7 @@ in a region where secondary delamination has already been detected.
 
 
 Normalization for multi-interface detection
-------------------------------
+-------------------------------------------
 
 In order to destinguish damage between interfaces, a relative normalization
 using a somewhat recent frame is required. Otherwise, the same damage would
@@ -67,7 +67,7 @@ is performed as the default behaviour. For more information about the
 normalization, go to :doc:`Image_pre_processing`.
 
 - The primary pass uses a **static**-reference normalization, matching
-  :meth:`~deladect.detection.delamination.EdgeDetector.detect_primary`.
+  :meth:`~deladect.detection.EdgeDetector.detect_primary`.
 - The additional pass need a **rolling-median**-reference cache
   instead. A static reference stops highlighting change once a region has
   already darkened, but this check specifically needs to detect *further*
@@ -95,14 +95,15 @@ For each frame and each interface beyond the primary, the algorithm:
 4. Accumulates the accepted pixels into the running mask for that interface.
 
 .. figure:: _static/multi_interface_delamination/secondary_attribution.png
-:width: 100%
-:align: center
+   :alt: Attribution of further darkening to successive interfaces within previously detected damage
+   :width: 100%
+   :align: center
 
-Example of how delamination is attributed to different interfaces. 
-A rolling-reference candidate is eligible for a
-given interface only inside the settled mask of the previous interface and
-the intersection must remain connected to the specimen edge and is then 
-latched over time similar to before.
+   Example of how delamination is attributed to different interfaces.
+   A rolling-reference candidate is eligible for a
+   given interface only inside the settled mask of the previous interface and
+   the intersection must remain connected to the specimen edge and is then
+   latched over time similar to before.
 
 
 See :doc:`examples/delamination_multi_interface` for a runnable script and

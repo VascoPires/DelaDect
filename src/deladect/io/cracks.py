@@ -76,6 +76,34 @@ def export_rho(
 
     Columns are named ``rho_names`` (default ``rho_1``, ``rho_2``, ...).
     The specimen's ``strain_y`` is added when experimental data is loaded.
+
+    Parameters
+    ----------
+    specimen:
+        Specimen the results belong to.
+    ply:
+        Ply whose metrics folder receives the file.
+    *rho_lists:
+        One or more crack density sequences, one value per frame. All must
+        have the same length.
+    folder_name:
+        Subfolder of the ply's results (default ``"metrics"``).
+    file_name:
+        Name of the CSV file.
+    rho_names:
+        Column name of each sequence.
+    results_root:
+        Write under this root instead of the specimen's.
+
+    Returns
+    -------
+    pathlib.Path
+        Path of the written CSV file.
+
+    Raises
+    ------
+    ValueError
+        If no sequence is given, one is empty, or their lengths differ.
     """
     if not rho_lists or any(len(rho) == 0 for rho in rho_lists):
         raise ValueError("No rho data to export.")
@@ -100,7 +128,34 @@ def export_crack_spacing(
     file_name: str = "crack_spacing.csv",
     results_root: Optional[str] = None,
 ) -> Path:
-    """Write per-frame crack spacing records to CSV, with ``strain_y`` if available."""
+    """Write per-frame crack spacing records to CSV, with ``strain_y`` if available.
+
+    Parameters
+    ----------
+    specimen:
+        Specimen the results belong to.
+    ply:
+        Ply whose metrics folder receives the file.
+    processed_data:
+        Spacing records, e.g. the ``"records"`` of
+        :func:`~deladect.detection.crack_detection.crack_filtering_postprocessing`.
+    folder_name:
+        Subfolder of the ply's results (default ``"metrics"``).
+    file_name:
+        Name of the CSV file.
+    results_root:
+        Write under this root instead of the specimen's.
+
+    Returns
+    -------
+    pathlib.Path
+        Path of the written CSV file.
+
+    Raises
+    ------
+    ValueError
+        If ``processed_data`` is empty.
+    """
     if not processed_data:
         raise ValueError("No data to export.")
     return _write_ply_metrics(
@@ -118,7 +173,29 @@ def save_cracks(
     file_name: Optional[str] = None,
     results_root: Optional[str] = None,
 ) -> Path:
-    """Save one crack array per frame to ``.npz`` and record the file in ``ply.metadata``."""
+    """Save one crack array per frame to ``.npz`` and record the file in ``ply.metadata``.
+
+    Parameters
+    ----------
+    specimen:
+        Specimen the cracks belong to.
+    ply:
+        Ply the cracks were detected in.
+    cracks:
+        Cracks, one array per frame.
+    folder_name:
+        Subfolder of the ply's results (default ``"data"``).
+    file_name:
+        File name; ``.npz`` is added if it has no extension. Defaults to a
+        name built from the specimen and ply names.
+    results_root:
+        Write under this root instead of the specimen's.
+
+    Returns
+    -------
+    pathlib.Path
+        Path of the written file.
+    """
     target = _ply_dir(specimen, ply, folder_name or "data", results_root=results_root)
     resolved = (file_name or crack_file_name(specimen, ply)).lstrip("_-")
     if Path(resolved).suffix == "":
@@ -128,7 +205,23 @@ def save_cracks(
 
 
 def load_cracks(ply: Ply) -> List[np.ndarray]:
-    """Load the cracks saved by :func:`save_cracks`, one array per frame."""
+    """Load the cracks saved by :func:`save_cracks`, one array per frame.
+
+    Parameters
+    ----------
+    ply:
+        Ply whose ``metadata`` records the saved file.
+
+    Returns
+    -------
+    list[numpy.ndarray]
+        The cracks of each frame, in frame order.
+
+    Raises
+    ------
+    ValueError
+        If no crack file is recorded on ``ply``.
+    """
     bundle = load_ply_crack_results(ply)
     return [np.asarray(bundle[key]) for key in sorted(bundle)]
 

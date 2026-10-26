@@ -20,7 +20,7 @@ help negate the already mentioned issues which are applied in order:
 
 DelaDect does this once per image stack, before any crack or delamination
 detector runs, via
-:meth:`~deladect.detection.delamination.DelaminationDetector.preprocess_stack_to_disk`.
+:meth:`~deladect.detection.DelaminationDetector.preprocess_stack_to_disk`.
 
 .. note::
 
@@ -31,39 +31,33 @@ detector runs, via
    :doc:`image_operations`). This page covers the stack-wide step that
    conditions raw frames before any detector runs.
 
-.. currentmodule:: deladect.detection.delamination
+.. currentmodule:: deladect.detection
 
 History clamp
 --------------
-A reflection or a speck of dust can make a pixel flicker bright for a
-single frame and then go back to normal. That's noise, not damage, and it
-needs to be filtered out before it affects detection. The history clamp
-does this by remembering, for every
-pixel, the darkest value it has *ever* reached so far, and forcing the
-current frame down to that darkest-so-far value: ``min(current_frame, history)``.
-A pixel only stays dark in the output once it has *actually* gone dark and
-stayed that way across frames. 
+During image acquisition, reflections, dust, or other sources of noise may cause sudden changes 
+in pixel intensity that do not correspond to actual damage. To reduce these effects, the history 
+clamp applies a cumulative minimum, where each pixel is assigned the lowest intensity value recorded 
+up to the current frame (``min(current_frame, history)``). This prevents temporary increases in brightness 
+from affecting the detection. However, temporary darkening may still be retained and lead to false detections.
 
-This is on by default (``history_clamp=True``) and controlled by
-``history_mode``: ``"running"`` remembers the darkest value over the
-*entire* stack so far, while a rolling window only looks back
-``history_window_size`` frames. The second one would only be needed
-in very specific conditions where very obvious shadows show up (from a hand
-or some other factor) and the user doesn't wish to keep a full history
-of the ImageStack. Nevertheless, for most cases, the full history clamp
-is the most suitable.
+By default, the history clamp is enabled (``history_clamp=True``) and can be configured through 
+``history_mode``. The ``"running"`` mode considers the complete image history, while the ``"rolling"`` mode only 
+considers the previous ``history_window_size`` frames. The ``"rolling"`` mode may be useful when temporary shadows or 
+other illumination artefacts are present, as these would otherwise remain in the accumulated history.
+Nevertheless, for most experimental setups, the ``"running"`` mode is recommended.
 
 Bender et al. [Bender2021]_ use the same idea for crack detection in
 white-light imaging: without a clamp, per-frame noise stays flat forever while
 with the running clamp, it plateaus as history accumulates.
 
 The figure below shows this on a small synthetic image stack with noise, using
-DelaDect's own ``apply_minimum_history``: unclamped vs. clamped image.
+DelaDect's ``apply_minimum_history``: unclamped vs. clamped image.
 It is also seen the background pixel-value histograms 
 getting narrower and shifting to the darker side over time. 
 
 .. image:: _static/normalization/history_clamp_noise.png
-   :alt: An unclamped vs. history-clamped image strip across the stack, plus pixel-value histograms narrowing as history accumulates and a plot of the background median with its 10th-to-90th-percentile interval, flat without the clamp and converging with it
+   :alt: An unclamped vs. history-clamped image strip across the stack, plus pixel-value histograms narrowing as history accumulates and a plot of the background median, approximately constant without the clamp and decreasing with it
    :width: 100%
    :align: center
 
@@ -97,7 +91,7 @@ However the most important decision is
 - ``"static"`` (default): one fixed first frame, reused for the whole
   stack. Standard for :meth:`EdgeDetector.detect_primary`,
   :meth:`DelaminationDetector.detect_both_delaminations`, and
-  :meth:`DiffuseDetector.diffuse_delamination`. It is fairly robust
+  :meth:`DiffuseDetector.detect_diffuse`. It is fairly robust
   since the background and initial damage is removed from the image
   and only new damage shows up as dark pixels.
 - ``"rolling_median"``: an adaptive baseline built from the median of a

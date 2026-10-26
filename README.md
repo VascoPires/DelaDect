@@ -14,8 +14,8 @@
   <a href="https://pypi.org/project/deladect/">
     <img src="https://img.shields.io/pypi/v/deladect?logo=pypi&logoColor=white" alt="PyPI">
   </a>
-  <a href="#citing-deladect">
-    <img src="https://img.shields.io/badge/DOI-pending-lightgrey?logo=doi" alt="Paper DOI (pending)">
+  <a href="https://doi.org/10.2139/ssrn.7404666">
+    <img src="https://img.shields.io/badge/DOI-10.2139%2Fssrn.7404666-blue?logo=doi" alt="Preprint DOI">
   </a>
   <a href="https://github.com/VascoPires/DelaDect/blob/main/LICENSE">
     <img src="https://img.shields.io/github/license/VascoPires/DelaDect" alt="License">
@@ -37,31 +37,38 @@ DelaDect is a Python package for quantitative damage analysis in fiber-reinforce
 
 ## Installation
 
-DelaDect was coded in `Python 3.10` with the Prerequisites defined in [Prerequisites](#prerequisites). A fresh Python environment (e.g. `conda create -n deladect python=3.10`) is strongly recommended, since DelaDect pins NumPy below 2.0 and an environment with a newer NumPy already installed can cause import errors. This is necessary to ensure 
-compatibility with the crack detection software CrackDect.
+DelaDect requires **Python 3.10** (any 3.10.x release). Use a fresh environment so its dependencies remain separate from other projects. NumPy is restricted to versions below 2.0 for compatibility with CrackDect.
 
-To install from source:
+Until DelaDect is published on PyPI, install it from source:
 
 ```bash
+conda create -n deladect python=3.10 pip
+conda activate deladect
 git clone https://github.com/VascoPires/DelaDect.git
 cd DelaDect
-conda create -n deladect python=3.10
-conda activate deladect
-pip install -e .
+python -m pip install .
+```
+
+For development, use `python -m pip install -e ".[dev]"` instead. Check the installation with:
+
+```bash
+python --version
+python -c "import deladect; print(deladect.__version__)"
 ```
 
 ## Prerequisites
 
-Dependencies are installed automatically via `pip`, pinned in `pyproject.toml`. The tool uses the following libraries:
+Python dependencies are installed automatically via `pip`, with version constraints defined in `pyproject.toml`:
 
-- [CrackDect](https://github.com/mattdrvo/CrackDect) 0.2
+- [CrackDect](https://github.com/mattdrvo/CrackDect) >= 0.2
 - scikit-image >= 0.18.1, < 0.23
 - NumPy >= 1.23.5, < 2 
 - SciPy >= 1.10.0, < 1.13
 - Pandas >= 1.3.5, < 2.2
 - Matplotlib >= 3.7.5
-- Numba 
-- psutil 
+- Pillow >= 8.4.0
+
+The shift-correction GUI also requires Tk and a graphical desktop. If Tk is missing from the Conda environment, install it with `conda install tk`.
 
 ## Quick Start
 
@@ -69,11 +76,13 @@ For a full first run including delamination detection, start with the [Getting S
 
 ## Shift Correction
 
-The package also included a shift-distortion correction for the image stack preparation before any analysis. It is assumed that the images provided to DelaDect have already been properly shift-corrected, as this represents a fundamental step of the methodology. 
+The package includes a GUI for correcting image shifts before analysis. Launch it from the activated environment:
 
 ```bash
-shift_correction --help
+shift_correction
 ```
+
+See the [Shift Correction guide](https://deladect.readthedocs.io/en/latest/shift_correction.html) for image preparation and GUI instructions.
 
 ## Repository Layout
 
@@ -85,19 +94,35 @@ src/deladect/         Core package
   specimen.py         Specimen and laminate classes
   utils.py            Image and geometry helpers
 docs/                 Documentation
+example_images/       Sample images and annotations used by the examples
+notebooks/            Runnable analysis notebooks
 pyproject.toml        Packaging and dependency configuration
 ```
 
+Generated analysis outputs are written to `results/`, which is excluded from
+version control. Notebook outputs are cleared before committing; run the
+notebooks to regenerate their figures. See [docs/README.md](docs/README.md)
+for local documentation build instructions.
+
 ## Citing DelaDect
 
-A paper describing DelaDect's methodology is in preparation. Once it is
-published, its DOI will replace the "pending" badge above and be listed
-here together with the citation details. If you use DelaDect in your work
-in the meantime, please cite the repository directly:
+If you use DelaDect in your work, please cite the preprint:
 
 ```text
-Pires, V. D. C. DelaDect: Optical Delamination Detection in Fiber-Reinforced
-Polymers. https://github.com/VascoPires/DelaDect
+Pires, V. D. C., Rettl, M., Pletz, M., Schuecker, C. DelaDect: Optical
+delamination detection in fiber-reinforced polymers. Available at SSRN:
+https://ssrn.com/abstract=7404666, http://dx.doi.org/10.2139/ssrn.7404666
+```
+
+```bibtex
+@misc{pires_deladect,
+  author       = {Pires, Vasco D. C. and Rettl, Matthias and Pletz, Martin and Schuecker, Clara},
+  title        = {{DelaDect}: Optical delamination detection in fiber-reinforced polymers},
+  year         = {2026},
+  howpublished = {SSRN preprint},
+  url          = {https://ssrn.com/abstract=7404666},
+  doi          = {10.2139/ssrn.7404666}
+}
 ```
 
 ## Authors And License

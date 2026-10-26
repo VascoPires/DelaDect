@@ -136,7 +136,7 @@ at the last sampled frame.
 2. Standalone edge delamination
 --------------------------------
 
-:meth:`~deladect.detection.delamination.EdgeDetector.detect_primary` runs
+:meth:`~deladect.detection.EdgeDetector.detect_primary` runs
 entirely on its own -- no crack catalogue, no diffuse pipeline, and no second
 interface required. This is the same edge algorithm used inside
 ``detect_both_delaminations``, just called directly on ``90/-30``.
@@ -170,7 +170,7 @@ requested); the snippet above saves the returned masks explicitly with
 3. Multi-interface detection
 ------------------------------
 
-:meth:`~deladect.detection.delamination.EdgeDetector.detect_edge_multi` checks
+:meth:`~deladect.detection.EdgeDetector.detect_edge_multi` checks
 for new damage inside a previously delaminated area. If new damage is found
 inside the parent interface's mask, it is attributed to the next, deeper
 interface.

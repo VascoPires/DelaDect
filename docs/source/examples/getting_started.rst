@@ -63,7 +63,7 @@ plies. More details about the crack detection can be found in :doc:`../detection
 
    interface = specimen.add_interface(name="i0", upper_ply=ply0, lower_ply=ply90)
 
-After the specimen is created, the crack detection can be run with :func:`crack_analysis`. This step is only required
+After the specimen is created, the crack detection can be run with :func:`~deladect.detection.crack_analysis`. This step is only required
 if diffuse delamination is required for the analysis.
 
 .. code-block:: python
@@ -143,9 +143,10 @@ The outputs of the crack and delamination detection with the referred parameters
    :align: center
 
 
-This minimal example shows how to use DelaDect for a complete analysis of a specimen. To go further,
-continue with :doc:`delamination_multi_interface` for hierarchical multi-interface edge delamination,
-or :doc:`../results_storage` for persisting and reloading a specimen's results.
+This minimal example shows how to use DelaDect for a complete analysis of a specimen, however it can be seen that some
+regions around cracks close to the edge were not detected. This is because the diffuse delamination detection is constrained to the middle region.
+This was done on purpose in order to show the difference between the region-based and full-image workflows. The next section shows how to use the full-image 
+workflow which would be better suited for this specimen.
 
 
 Using the full frame stack
@@ -155,7 +156,7 @@ stacks. In this mode the full image is used for crack and diffuse delamination
 detection. For edge delamination, the tool divides each full frame into upper
 and lower halves and processes both free edges with the same edge-seeding.
 
-With this example, it is a good time to introduce the built-in factory methods for specimen creation.
+With this example, it is a good time to introduce the built-in methods for specimen creation.
 DelaDect provides two pre-defined layup constructors on :class:`~deladect.specimen.Specimen`:
 
 - :meth:`~deladect.specimen.Specimen.from_cross_ply`, used below, builds a ``[0, 90]`` cross-ply
@@ -201,8 +202,8 @@ close to the specimen edge is simply outside that domain and cannot be detected.
 full image is therefore the better choice. In other cases, however, where edge and diffuse delamination
 grow into contact with each other, splitting the image into regions can be preferable, since edge delamination must be
 connected to the specimen edge, and takes precedence over diffuse delamination wherever the two overlap, so an
-unconstrained full-image analysis can misclassify diffuse damage as edge damage once they connect. For a deeper
-understanding of this mechanism, see :doc:`../edge_delamination`, which includes further examples and explanations.
+unconstrained full-image analysis can misclassify diffuse damage as edge damage once they connect. For a better
+understanding of this mechanism, see :doc:`../edge_delamination`, which includes further explanations.
 
 
 References

@@ -139,14 +139,22 @@ dmypy.json
 /sandbox.py
 /results/
 # Claude Code / memsearch
+.agents/
+.codex/
 .claude/
 .memsearch/
+.aws/
 .vscode/
+.idea/
+.ruff_cache/
+_py_cache/
+.DS_Store
+Thumbs.db
 
 # manim render output / cache
 /animations/
 /animations/media/
-media/
+/media/
 *.manim_stack_trace_cache/
 Tex/
 Text/
@@ -157,3 +165,49 @@ partial_movie_files/
 /flowchart.png
 /idea.png
 /render_animations.py
+
+# Local research helpers and manuscript files
+/aux_scripts/
+/paper_figures/
+/examples/
+/Paper_1___Software_X*.pdf
+/SOFTX-D-26-01155*.pdf
+/Review answers.md
+/flowchart_deladect.svg
+/example_images/this_image.png
+
+# LaTeX build intermediates (retain source and documentation figures)
+*.aux
+*.fdb_latexmk
+*.fls
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+*.out
+
+# Local copies and rendering intermediates not needed by the public docs
+/docs/media/
+/docs/generate_*_figure.py
+/docs/source/_static/shift_correction/cut_images_frames/
+/docs/source/_static/shift_correction/*_palette.png
+/docs/source/_static/deladect_dark.svg
+/docs/source/_static/deladect_white.svg
+/docs/source/deladect_logo.jpg
+/docs/source/_static/delamination/diffuse_crack_tracking.gif
+/docs/source/_static/examples/connected_edge_square_masks.svg
+/docs/source/_static/image_operations/frame_latching.gif
+
+# Printable figure exports remain local; the docs use the PNG versions
+/docs/source/_static/delamination/synthetic_validation.pdf
+/docs/source/_static/delamination/synthetic_validation_detectability.pdf
+/docs/source/_static/delamination/synthetic_validation_sweep_examples.pdf
+/docs/source/_static/delamination/synthetic_validation_window_diffuse.pdf
+
+# Additional local datasets not used by the public examples
+/example_images/sample-2/
+/example_images/sample-1_example_exp_data/
+
+# Local environment variants
+.env.*
+!.env.example

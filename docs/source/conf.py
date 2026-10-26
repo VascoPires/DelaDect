@@ -69,10 +69,8 @@ html_theme_options = {
             'type': 'fontawesome',
         },
         {
-            # TODO: replace with the DOI landing page once the paper is published,
-            # e.g. 'https://doi.org/10.xxxx/xxxxxxx'.
-            'name': 'Paper (DOI pending)',
-            'url': 'https://github.com/VascoPires/DelaDect#citing-deladect',
+            'name': 'Preprint (DOI)',
+            'url': 'https://doi.org/10.2139/ssrn.7404666',
             'icon': 'fa-solid fa-file-lines',
             'type': 'fontawesome',
         },

@@ -1,15 +1,12 @@
 Detection API Reference
 =======================
 
-The public detection API is exposed through :mod:`deladect.detection`. In
-this page all the accessible classes, methods, functions are accessible along
-with all the default values of each function.
+This page lists the main public classes and functions of
+``deladect.detection``, including their arguments and default values.
 
-The package has two public areas:
-
-- :mod:`deladect.detection.crack_detection` provides crack-analysis functions.
-- :mod:`deladect.detection.delamination` provides the class-based edge,
-  diffuse, combined, and multi-interface delamination API.
+- The delamination detectors find edge, diffuse, combined, and
+  multi-interface delamination.
+- The crack functions run CrackDect on each ply and plot the result.
 
 .. currentmodule:: deladect.detection
 
@@ -22,8 +19,6 @@ Classes
    DelaminationDetector
    EdgeDetector
    DiffuseDetector
-   CrackDetection
-   CrackTrack
 
 Functions
 ---------
@@ -34,26 +29,12 @@ Functions
    crack_analysis
    crack_eval
    plot_cracks
-   normalize_detections
-   match_tracks
-
-Modules
--------
-
-The module pages provide automatically generated class and function
-inventories, matching the organization of the source package.
-
-.. autosummary::
-   :toctree: generated
-
-   crack_detection
-   crack_tracking
-   delamination
 
 Related documentation
 ---------------------
 
-- :doc:`methodology` explains the complete delamination workflow.
-- :doc:`edge_delamination` and :doc:`diffuse_delamination` explain the two
-  detection modes.
-- :doc:`examples/getting_started` provides a complete runnable analysis.
+For more details on how to use the detection methods, see:
+
+- :doc:`methodology` for the complete delamination workflow.
+- :doc:`edge_delamination` and :doc:`diffuse_delamination` for each detection method.
+- :doc:`examples/getting_started` for a complete analysis example.

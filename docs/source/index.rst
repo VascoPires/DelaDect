@@ -24,25 +24,30 @@ reproducible and separate from the system's Python.
 
 Installation
 ~~~~~~~~~~~~
-Supported Python is ``>=3.10``.
-You can check your current Python version:
+DelaDect requires **Python 3.10** (any 3.10.x release). NumPy is restricted to
+versions below 2.0 for compatibility with CrackDect.
+Create and activate a fresh Conda environment:
 
 .. code-block:: bash
 
-   $ python --version
+   conda create -n deladect python=3.10 pip
+   conda activate deladect
 
-Create and activate a new environment (either conda or venv). For example, using conda:
-
-.. code-block:: bash
-
-   $ conda create -n deladect_env python=3.10 -y
-   $ conda activate deladect_env
-
-Then, install DelaDect and dependencies:
+Until DelaDect is published on PyPI, install it from source:
 
 .. code-block:: bash
 
-   $ pip install deladect
+   git clone https://github.com/VascoPires/DelaDect.git
+   cd DelaDect
+   python -m pip install .
+
+For development, use ``python -m pip install -e ".[dev]"`` instead.
+Check the installation with:
+
+.. code-block:: bash
+
+   python --version
+   python -c "import deladect; print(deladect.__version__)"
 
 
 .. _prerequisites:
@@ -53,12 +58,16 @@ Prerequisites
 DelaDect dependencies are installed automatically. 
 
 - `CrackDect ≥ 0.2 <https://pypi.org/project/crackdect/>`_
-- `NumPy ≥ 1.23.5 <https://numpy.org/>`_
-- `SciPy ≥ 1.10.0 <https://scipy.org/>`_
-- `Pandas ≥ 1.3.5 <https://pandas.pydata.org/>`_
+- `NumPy ≥ 1.23.5, < 2 <https://numpy.org/>`_
+- `SciPy ≥ 1.10.0, < 1.13 <https://scipy.org/>`_
+- `Pandas ≥ 1.3.5, < 2.2 <https://pandas.pydata.org/>`_
 - `Matplotlib ≥ 3.7.5 <https://matplotlib.org/>`_
-- `scikit-image ≥ 0.18.1 <https://scikit-image.org/>`_
+- `scikit-image ≥ 0.18.1, < 0.23 <https://scikit-image.org/>`_
 - `Pillow ≥ 8.4.0 <https://python-pillow.org/>`_
+
+The shift-correction GUI also requires Tk and a graphical desktop. If Tk is
+missing from the Conda environment, install it with ``conda install tk``.
+Launch the GUI with ``shift_correction``; see :doc:`shift_correction` for instructions.
 
 
 There are binder notebooks available in this repository to run the examples without installing DelaDect. 

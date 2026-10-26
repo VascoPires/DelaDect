@@ -322,28 +322,42 @@ def plot_cracks(
     color: str = "red",
     background_flag: bool = False,
     comparison: bool = False,
+    ax: Optional[plt.Axes] = None,
+    **kwargs: Any,
 ):
-    """Plot crack segments, optionally over the image.
+    """Plots cracks in the foreground with an option of displaying the background.
+
+    Note: This function is directly adapted from CrackDect library https://doi.org/10.1016/j.softx.2021.100832.
 
     Parameters
     ----------
     image:
-        Frame the cracks were detected on.
+        Background image array drawn underneath the crack segments.
     cracks:
-        Segments of shape ``(n, 2, 2)`` with ``(y, x)`` end points.
-    linewidth, color:
-        Line style of the cracks.
+        Iterable of crack segments shaped ``(n, 2, 2)`` with ``(y, x)`` coordinates.
+    linewidth:
+        Width of the plotted crack lines.
+    color:
+        Matplotlib colour used for the crack overlays.
     background_flag:
-        Draw ``image`` behind the cracks.
+        If ``True``, render the greyscale background image.
     comparison:
-        Show the image twice side by side.
+        Duplicate the frame horizontally to mimic CrackDect comparison plots.
+    ax:
+        Optional :class:`matplotlib.axes.Axes` to draw on; one is created if omitted.
+    **kwargs:
+        Additional keyword arguments forwarded to :func:`matplotlib.pyplot.figure`.
 
     Returns
     -------
     dict[str, Any]
-        ``{"figure": Figure, "axes": Axes}``.
+        ``{"figure": Figure, "axes": Axes}``: the figure/axes containing the plot.
     """
-    fig, ax = plt.subplots()
+    if ax is None:
+        fig = plt.figure(**kwargs)
+        ax = fig.add_subplot(111)
+    else:
+        fig = ax.figure
     frame = image
     if comparison:
         frame = np.hstack((image, image))
@@ -403,6 +417,24 @@ def order_cracks(
 
     With ``delimiter``, vertical segments at the left and right image
     borders are added, so spacing is also measured to the edges.
+
+    Parameters
+    ----------
+    crack_list:
+        Cracks of shape ``(n, 2, 2)``, each given by its two ``(y, x)``
+        end points.
+    delimiter:
+        Add the border segments at columns ``0`` and ``image_width``.
+    image_height:
+        Image height in pixels, the length of the border segments.
+    image_width:
+        Image width in pixels, the column of the right border segment.
+
+    Returns
+    -------
+    numpy.ndarray
+        The sorted cracks, with the border segments first and last when
+        ``delimiter`` is set.
     """
     if len(crack_list) == 0:
         return crack_list
@@ -429,6 +461,28 @@ def crack_grouping(
     within twice the crack width become one vertical segment. Then
     neighbors whose end points are within ``threshold`` pixels are
     joined, as a vertical segment if ``generate_vertical_crack``.
+
+    Parameters
+    ----------
+    ordered_cracks:
+        Cracks of shape ``(n, 2, 2)`` sorted by :func:`order_cracks`.
+    threshold:
+        Largest distance in pixels between the end points of two
+        neighboring cracks for them to be joined.
+    generate_vertical_crack:
+        Replace two joined cracks by a vertical segment at their mean
+        column; otherwise join the first crack's start to the second
+        crack's end.
+    group_within_crack_width:
+        First merge cracks whose mean columns are within
+        ``2 * avg_crack_width_px``.
+    avg_crack_width_px:
+        Crack width in pixels used by ``group_within_crack_width``.
+
+    Returns
+    -------
+    numpy.ndarray
+        The cracks after grouping, shape ``(m, 2, 2)`` with ``m <= n``.
     """
     if len(ordered_cracks) == 0:
         return ordered_cracks
@@ -479,17 +533,37 @@ def crack_grouping(
 
 
 def crack_filter(crack_list: List[np.ndarray], *, length_threshold: float) -> List[np.ndarray]:
-    """Drop cracks shorter than ``length_threshold``."""
+    """Drop cracks shorter than ``length_threshold``.
+
+    Parameters
+    ----------
+    crack_list:
+        Cracks of one frame.
+    length_threshold:
+        Smallest crack length in pixels that is kept.
+
+    Returns
+    -------
+    list[numpy.ndarray]
+        The cracks at least ``length_threshold`` long.
+    """
     return [crack for crack in crack_list if crack_length(crack) >= length_threshold]
 
 
 def compute_crack_spacing(crack_list: List[np.ndarray]) -> Dict[str, Any]:
     """Column distance between the midpoints of neighboring cracks.
 
+    Parameters
+    ----------
+    crack_list:
+        Cracks of one frame.
+
     Returns
     -------
     dict[str, Any]
-        ``{"spacing": list[float], "avg_spacing": float, "std_spacing": float}``.
+        ``{"spacing": list[float], "avg_spacing": float, "std_spacing": float}``:
+        the spacings in pixels, their mean and their standard deviation.
+        All are empty or ``0.0`` with fewer than two cracks.
     """
     if not crack_list:
         return {"spacing": [], "avg_spacing": 0.0, "std_spacing": 0.0}
@@ -519,6 +593,31 @@ def crack_filtering_postprocessing(
     grouped, and their spacing computed. With ``remove_outliers`` the
     mean and standard deviation ignore spacings outside 1.5 IQR.
     Spacings are converted to millimeters with ``specimen.scale_px_mm``.
+
+    Grouping merges cracks closer than twice ``specimen.avg_crack_width_px``
+    and opposing cracks whose tips almost touch (within
+    ``avg_crack_grouping_th_px``), see :func:`crack_grouping`.
+
+    Parameters
+    ----------
+    specimen:
+        Specimen that gives the image size, crack width and scale.
+    cracks:
+        Detected cracks, one array per frame.
+    avg_crack_grouping_th_px:
+        Largest tip distance in pixels for grouping two cracks.
+    crack_length_th:
+        Smallest crack length in pixels that is kept.
+    export_images:
+        Save a plot of the filtered cracks per frame.
+    background:
+        Draw the first frame behind the cracks in those plots.
+    remove_outliers:
+        Ignore spacings outside 1.5 IQR in the mean and standard deviation.
+    grouping:
+        Group nearby cracks before computing the spacing.
+    results_dir:
+        Write the plots under this root instead of the specimen's.
 
     Returns
     -------
@@ -586,8 +685,14 @@ def crack_filtering_postprocessing(
 def pixels_to_length(input_data: List[Any], *, scale_px_mm: float) -> Dict[str, Any]:
     """Divide pixel values by ``scale_px_mm``.
 
-    ``input_data`` is either a list of numbers or a list of spacing
-    records with ``Avg_spacing`` and ``Std_spacing`` keys.
+    Parameters
+    ----------
+    input_data:
+        Either a list of numbers (e.g. crack densities) or the spacing
+        records of :func:`crack_filtering_postprocessing`, with
+        ``Avg_spacing`` and ``Std_spacing`` keys.
+    scale_px_mm:
+        Image scale in pixels per millimeter.
 
     Returns
     -------
