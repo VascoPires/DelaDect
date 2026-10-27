@@ -98,7 +98,7 @@ supplied to the detector. The same parameter configuration was used throughout t
    **(d)** Detection: red = edge, green = diffuse.
    **(e)** Combined damage agreement (blue), excess (orange), and missed
    damage (purple); this panel does not distinguish damage classes.
-   **(f)** Known (solid) and detected (dashed) area. Panels (b)–(e) show
+   **(f)** Known (solid) and detected (dashed) area. Panels (b)-(e) show
    the final frame.
 
 True damage area correctly detected is the share of the reference damage
@@ -127,38 +127,15 @@ underestimation. Combined masks count overlapping damage once.
      - 40.9
      - +1.09
 
-Early diffuse damage is often missed; the table reports the final frame shown
-in the figure. The disconnected dark rectangle is rejected in this example.
 
-The diffuse filter window was selected by comparing ``(1, 20)`` and ``(1, 15)``
-on the same 30 images, using the corrected reference classes and the same
-remaining parameters:
-
-.. list-table:: Diffuse-window comparison
-   :header-rows: 1
-
-   * - Window
-     - Final-frame true area correctly detected (%)
-     - Final-frame IoU
-     - Final-frame area error (%)
-     - Mean IoU over frames with diffuse damage
-   * - ``(1, 20)``
-     - 95.6
-     - 0.866
-     - +5.89
-     - 0.475
-   * - ``(1, 15)``
-     - 96.6
-     - 0.878
-     - +6.58
-     - 0.501
-
-The smaller window improves diffuse coverage and mask overlap, with slightly
-more excess area. It does not improve every measure: mean absolute diffuse
-area error increases from 43.7% to 44.9%, and mean combined IoU decreases from
-0.934 to 0.933. Neither setting marks damage in the initial undamaged frames.
-This comparison uses the same synthetic sequence for parameter selection and
-evaluation; it does not establish performance on independent images.
+The smaller window improves diffuse delamination coverage 
+and mask overlap, but also leads to a slightly larger excess area.
+ However, not all metrics improve. The mean absolute diffuse area 
+ error increases from 43.7% to 44.9%, while the mean combined IoU 
+ decreases from 0.934 to 0.933. Both settings correctly identify the 
+ initial frames as undamaged. It should also be noted that the same 
+ synthetic sequence was used for parameter selection and evaluation, 
+ so these results do not necessarily reflect the performance on independent images.
 
 .. dropdown:: How the artificial sequence is generated
 
