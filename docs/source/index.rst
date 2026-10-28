@@ -33,15 +33,21 @@ Create and activate a fresh Conda environment:
    conda create -n deladect python=3.10 pip
    conda activate deladect
 
-Until DelaDect is published on PyPI, install it from source:
+Install DelaDect from PyPI:
+
+.. code-block:: bash
+
+   python -m pip install deladect
+
+To work on the code or run the example notebooks, install it from source
+instead:
 
 .. code-block:: bash
 
    git clone https://github.com/VascoPires/DelaDect.git
    cd DelaDect
-   python -m pip install .
+   python -m pip install -e ".[dev]"
 
-For development, use ``python -m pip install -e ".[dev]"`` instead.
 Check the installation with:
 
 .. code-block:: bash

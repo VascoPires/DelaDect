@@ -127,16 +127,6 @@ underestimation. Combined masks count overlapping damage once.
      - 40.9
      - +1.09
 
-
-The smaller window improves diffuse delamination coverage 
-and mask overlap, but also leads to a slightly larger excess area.
- However, not all metrics improve. The mean absolute diffuse area 
- error increases from 43.7% to 44.9%, while the mean combined IoU 
- decreases from 0.934 to 0.933. Both settings correctly identify the 
- initial frames as undamaged. It should also be noted that the same 
- synthetic sequence was used for parameter selection and evaluation, 
- so these results do not necessarily reflect the performance on independent images.
-
 .. dropdown:: How the artificial sequence is generated
 
    Each of the 30 frames starts from an undamaged background with a smooth
