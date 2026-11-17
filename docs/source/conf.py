@@ -69,8 +69,8 @@ html_theme_options = {
             'type': 'fontawesome',
         },
         {
-            'name': 'Preprint (DOI)',
-            'url': 'https://doi.org/10.2139/ssrn.7404666',
+            'name': 'Paper (DOI)',
+            'url': 'https://doi.org/10.1016/j.softx.2026.103236',
             'icon': 'fa-solid fa-file-lines',
             'type': 'fontawesome',
         },

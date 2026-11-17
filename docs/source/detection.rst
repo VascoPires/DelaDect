@@ -4,9 +4,21 @@ Detection API Reference
 This page lists the main public classes and functions of
 ``deladect.detection``, including their arguments and default values.
 
+- :class:`~deladect.specimen.Specimen` holds the images, plies and
+  interfaces of a test specimen, and is passed to every detector.
 - The delamination detectors find edge, diffuse, combined, and
   multi-interface delamination.
 - The crack functions run CrackDect on each ply and plot the result.
+
+.. currentmodule:: deladect.specimen
+
+Specimen
+--------
+
+.. autosummary::
+   :toctree: generated
+
+   Specimen
 
 .. currentmodule:: deladect.detection
 

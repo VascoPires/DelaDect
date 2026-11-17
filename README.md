@@ -14,8 +14,8 @@
   <a href="https://pypi.org/project/deladect/">
     <img src="https://img.shields.io/pypi/v/deladect?logo=pypi&logoColor=white" alt="PyPI">
   </a>
-  <a href="https://doi.org/10.2139/ssrn.7404666">
-    <img src="https://img.shields.io/badge/DOI-10.2139%2Fssrn.7404666-blue?logo=doi" alt="Preprint DOI">
+  <a href="https://doi.org/10.1016/j.softx.2026.103236">
+    <img src="https://img.shields.io/badge/DOI-10.1016%2Fj.softx.2026.103236-blue?logo=doi" alt="Paper DOI">
   </a>
   <a href="https://github.com/VascoPires/DelaDect/blob/main/LICENSE">
     <img src="https://img.shields.io/github/license/VascoPires/DelaDect" alt="License">
@@ -112,22 +112,22 @@ for local documentation build instructions.
 
 ## Citing DelaDect
 
-If you use DelaDect in your work, please cite the preprint:
+If you use DelaDect in your work, please cite the paper:
 
 ```text
-Pires, V. D. C., Rettl, M., Pletz, M., Schuecker, C. DelaDect: Optical
-delamination detection in fiber-reinforced polymers. Available at SSRN:
-https://ssrn.com/abstract=7404666, http://dx.doi.org/10.2139/ssrn.7404666
+Pires, V. D. C., Rettl, M., Pletz, M., Schuecker, C. (2026). DelaDect: Optical
+delamination detection in fiber-reinforced polymers. SoftwareX, 103236.
+https://doi.org/10.1016/j.softx.2026.103236
 ```
 
 ```bibtex
-@misc{pires_deladect,
-  author       = {Pires, Vasco D. C. and Rettl, Matthias and Pletz, Martin and Schuecker, Clara},
-  title        = {{DelaDect}: Optical delamination detection in fiber-reinforced polymers},
-  year         = {2026},
-  howpublished = {SSRN preprint},
-  url          = {https://ssrn.com/abstract=7404666},
-  doi          = {10.2139/ssrn.7404666}
+@article{pires_deladect,
+  author  = {Pires, Vasco D. C. and Rettl, Matthias and Pletz, Martin and Schuecker, Clara},
+  title   = {{DelaDect}: Optical delamination detection in fiber-reinforced polymers},
+  journal = {SoftwareX},
+  year    = {2026},
+  pages   = {103236},
+  doi     = {10.1016/j.softx.2026.103236}
 }
 ```
 

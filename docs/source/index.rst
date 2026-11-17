@@ -117,7 +117,7 @@ You can access it at
 Authors
 ~~~~~~~
 The current code base was developed by
-`Vasco D. C. Pires <www.vascodcpires.com/>`_ with affiliation to the
+`Vasco D. C. Pires <https://www.vascodcpires.com/>`_ with affiliation to the
 `Institute Designing Plastics and Composite Materials (TU Leoben) <https://www.kunststofftechnik.at/en/konstruieren>`_.
 
 License

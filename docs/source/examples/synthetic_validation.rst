@@ -98,8 +98,7 @@ supplied to the detector. The same parameter configuration was used throughout t
    **(d)** Detection: red = edge, green = diffuse.
    **(e)** Combined damage agreement (blue), excess (orange), and missed
    damage (purple); this panel does not distinguish damage classes.
-   **(f)** Known (solid) and detected (dashed) area. Panels (b)-(e) show
-   the final frame.
+   **(f)** Known (solid) and detected (dashed) area. 
 
 True damage area correctly detected is the share of the reference damage
 area that the detector marks as the same damage type. Area marked by both
@@ -112,20 +111,14 @@ underestimation. Combined masks count overlapping damage once.
 
    * - Damage type
      - True damage area correctly detected, final frame (%)
-     - Area marked by both, final frame (% of frame)
      - Area error, final frame (%)
    * - Edge
      - 99.7
-     - 34.5
      - +0.04
    * - Diffuse
      - 96.6
-     - 6.3
      - +6.58
-   * - Combined
-     - 99.3
-     - 40.9
-     - +1.09
+
 
 .. dropdown:: How the artificial sequence is generated
 
